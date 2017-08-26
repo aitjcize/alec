@@ -36,7 +36,7 @@ def log(text):
 
 
 class TickerMonitor(WebSocketBaseClient):
-    def __init__(self, symbols, threshold=0.01, window_size=100):
+    def __init__(self, symbols, threshold=0.01, window_size=30):
         super(TickerMonitor, self).__init__('wss://api.bitfinex.com/ws/2')
         self._threshold = threshold
         self._window_size = window_size
@@ -72,10 +72,10 @@ class TickerMonitor(WebSocketBaseClient):
          LAST_PRICE, VOLUME, HIGH, LOW) = data
 
         new_avg_price = (BID + ASK) / 2.0
-
-        if self._moving_average[symbol] > 0:
-            ratio = new_avg_price / self._moving_average[symbol]
-            if ratio > (1 + self._threshold) or ratio < (1 - self._threshold):
+        if self._moving_average[symbol] > 0 and len(self._prices[symbol]):
+            new_price_delta = new_avg_price - self._prices[symbol][-1]
+            ratio = new_price_delta / self._moving_average[symbol]
+            if abs(ratio) > self._threshold:
                 log('Pair %s price changed, ratio = %.2f' % (symbol, ratio))
 
         self._prices[symbol].append(new_avg_price)
