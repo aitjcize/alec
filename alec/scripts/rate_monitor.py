@@ -1,36 +1,28 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import api_config
 import hashlib
 import hmac
 import json
 import threading
 import time
 
-# from slacker import Slacker
 from ws4py.client import WebSocketBaseClient
 
-# _SLACK_TOKEN = 'xoxb-232301319077-M3eA0b6smXVcv3FAwjh1275f'
-# _SLACK_CHANNEL = '#trading'
+from alec import config
 
 _SYMBOLS = [
     'fUSD'
 ]
 
-# slack = Slacker(_SLACK_TOKEN)
-
 
 def log(text):
     print(text)
-#     slack.chat.post_message(_SLACK_CHANNEL, text)
 
 
 class RateMonitor(WebSocketBaseClient):
-    WEBSOCKET_URL = 'wss://api.bitfinex.com/ws/2'
-
     def __init__(self, symbols, threshold=0.01, window_size=30):
-        super(RateMonitor, self).__init__(self.WEBSOCKET_URL)
+        super(RateMonitor, self).__init__(config.BFX_WS_ENDPOINT)
         self._threshold = threshold
         self._window_size = window_size
         self._symbols = symbols
@@ -46,11 +38,12 @@ class RateMonitor(WebSocketBaseClient):
         auth_nonce = str(time.time() * 1000)
         auth_payload = 'AUTH' + auth_nonce
         print(auth_payload)
-        auth_signature = hmac.new(api_config.API_SECRET, auth_payload, hashlib.sha384).hexdigest()
+        auth_signature = hmac.new(config.BFX_API_SECRET, auth_payload,
+                                  hashlib.sha384).hexdigest()
         print("sha: %s" % auth_signature)
         self.send(json.dumps({
             'event': 'auth',
-            'apiKey': api_config.API_KEY,
+            'apiKey': config.BFX_API_KEY,
             'authSig': auth_signature,
             'authPayload': auth_payload,
             'authNonce': auth_nonce
