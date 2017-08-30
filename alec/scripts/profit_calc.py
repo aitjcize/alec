@@ -20,6 +20,13 @@ class ProfitCalc(object):
     def __init__(self, csvfile):
         self._csvfile = csvfile
 
+    def print_amount(self, amount, desc=None):
+        if desc:
+            desc = ' (%s)' % desc
+        print('%s%.2f%s' % (' ' if amount >= 0.0 else '',
+                            amount,
+                            desc or ''))
+
     def process(self):
         dates = []
         positions = []
@@ -52,9 +59,9 @@ class ProfitCalc(object):
         total_fundcosts = sum(fundcosts)
 
         print('Profit from %s to %s:' % (min(dates), max(dates)))
-        print(' %.2f' % total)
-        print('%.2f (trading fees)' % total_fees)
-        print('%.2f (funding costs)' % total_fundcosts)
+        self.print_amount(total, 'margin earnings')
+        self.print_amount(total_fees, 'trading fees')
+        self.print_amount(total_fundcosts, 'funding costs')
         print('=%.2f' % (total + total_fees + total_fundcosts))
 
 
