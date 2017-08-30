@@ -12,6 +12,7 @@ USD = 'USD'
 POSITION_TEXT = 'Position closed'
 FEE_TEXT = 'Trading fees'
 FUNDCOST_TEXT = 'funding cost'
+FUNDPAY_TEXT = 'Funding Payment'
 
 DATETIME_FORMAT = '%Y-%m-%d %H:%M:%S'
 
@@ -32,6 +33,7 @@ class ProfitCalc(object):
         positions = []
         fees = []
         fundcosts = []
+        fundpays = []
 
         with open(self._csvfile, 'r') as f:
             data = f.read()
@@ -53,16 +55,21 @@ class ProfitCalc(object):
                 fees.append(amount)
             elif FUNDCOST_TEXT in desc:
                 fundcosts.append(amount)
+            elif FUNDPAY_TEXT in desc:
+                fundpays.append(amount)
 
-        total = sum(positions)
+        total_margin = sum(positions)
         total_fees = sum(fees)
         total_fundcosts = sum(fundcosts)
+        total_funding = sum(fundpays)
 
         print('Profit from %s to %s:' % (min(dates), max(dates)))
-        self.print_amount(total, 'margin earnings')
+        self.print_amount(total_margin, 'margin earnings')
         self.print_amount(total_fees, 'trading fees')
         self.print_amount(total_fundcosts, 'funding costs')
-        print('=%.2f' % (total + total_fees + total_fundcosts))
+        self.print_amount(total_funding, 'funding earnings')
+        print('=%.2f' % (total_margin + total_fees + total_fundcosts +
+                         total_funding))
 
 
 if __name__ == '__main__':
