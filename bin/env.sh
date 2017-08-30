@@ -7,3 +7,10 @@ if [ -e $GITROOT/.env ]; then
 fi
 
 export PATH=$GITROOT/bin:$PATH
+export PYTHONPATH=$GITROOT:$PYTHONPATH
+
+CONFIG_FILE=$GITROOT/bin/config.sh
+
+if [ -e $CONFIG_FILE ]; then
+  source $CONFIG_FILE
+fi

@@ -8,36 +8,20 @@ import time
 from slacker import Slacker
 from ws4py.client import WebSocketBaseClient
 
+from alec import config
 
-_SLACK_TOKEN = 'xoxb-232301319077-M3eA0b6smXVcv3FAwjh1275f'
-_SLACK_CHANNEL = '#trading'
 
-_MONITOR_PAIRS = [
-    'tBTCUSD',
-    'tETHUSD',
-    'tBCHUSD',
-    'tXMRUSD',
-    'tIOTUSD',
-    'tXRPUSD',
-    'tOMGUSD',
-    'tDSHUSD',
-    'tEOSUSD',
-    'tETCUSD',
-    'tZECUSD',
-    'tSANUSD'
-]
-
-slack = Slacker(_SLACK_TOKEN)
+slack = Slacker(config.SLACK_TOKEN)
 
 
 def log(text):
     print(text)
-    slack.chat.post_message(_SLACK_CHANNEL, text)
+    slack.chat.post_message(config.SLACK_CHANNEL, text)
 
 
 class TickerMonitor(WebSocketBaseClient):
     def __init__(self, symbols, threshold=0.01, window_size=30):
-        super(TickerMonitor, self).__init__('wss://api.bitfinex.com/ws/2')
+        super(TickerMonitor, self).__init__(config.BFX_WS_ENDPOINT)
         self._threshold = threshold
         self._window_size = window_size
         self._symbols = symbols
@@ -88,6 +72,6 @@ class TickerMonitor(WebSocketBaseClient):
 if __name__ == '__main__':
     log('=' * 30)
     log('TickerMonitor started')
-    ws = TickerMonitor(_MONITOR_PAIRS)
+    ws = TickerMonitor(config.PRICE_MONITOR_PAIRS)
     ws.connect()
     ws.run()
