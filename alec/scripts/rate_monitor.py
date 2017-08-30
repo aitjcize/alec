@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+from __future__ import print_function
+
 import hashlib
 import hmac
 import json
-import threading
 import time
 
+from slacker import Slacker
 from ws4py.client import WebSocketBaseClient
 
 from alec import config
@@ -15,9 +17,13 @@ _SYMBOLS = [
     'fUSD'
 ]
 
+slack = Slacker(config.SLACK_TOKEN) if config.SLACK_ENABLE else None
+
 
 def log(text):
     print(text)
+    if slack:
+        slack.chat.post_message(config.SLACK_CHANNEL, text)
 
 
 class RateMonitor(WebSocketBaseClient):
@@ -59,28 +65,32 @@ class RateMonitor(WebSocketBaseClient):
             }))
             time.sleep(0.5)
 
-    def received_message(self, msg):
-        data = json.loads(msg.data)
-        print(data)
+    def received_message(self, message):
+        data = json.loads(message.data)
         if 'event' in data:
             if data['event'] == 'subscribed':
                 self._chanId2symbol[data['chanId']] = data['symbol']
-                log('Symbol %s at channel %d' % (data['symbol'], data['chanId']))
+                log('Symbol %s at channel %d' %
+                    (data['symbol'], data['chanId']))
 
-        if type(data) == list:
+        if isinstance(data, list):
             chan_id = data[0]
 
             if chan_id in self._chanId2symbol:
-                if type(data[1]) == list:
+                if isinstance(data[1], list):
                     for transaction in data[1]:
-                        self.process_funding_trade(self._chanId2symbol[chan_id],transaction)
+                        self.process_funding_trade(
+                            self._chanId2symbol[chan_id], transaction)
                 elif data[1] == 'fte':
-                    self.process_funding_trade(self._chanId2symbol[chan_id], data[2])
+                    self.process_funding_trade(self._chanId2symbol[chan_id],
+                                               data[2])
 
     def process_funding_trade(self, symbol, data):
+        # pylint: disable=W0612
         (ID, MTS, AMOUNT, RATE, PERIOD) = data
-        print("Timestamp: %s, Rate: %f, Period: %d, Amount: %f" % (
-            time.strftime("%H:%M:%S", time.localtime(MTS / 1000)), RATE, PERIOD, abs(AMOUNT)))
+        print("%s: Timestamp: %s, Rate: %f, Period: %d, Amount: %f" % (
+            symbol, time.strftime("%H:%M:%S", time.localtime(MTS / 1000)),
+            RATE, PERIOD, abs(AMOUNT)))
 
     def handshake_ok(self):
         pass

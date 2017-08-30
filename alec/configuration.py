@@ -5,6 +5,7 @@ import os
 
 
 class Config(object):
+    SLACK_ENABLE = bool(os.getenv('SLACK_ENABLE', False))
     SLACK_TOKEN = os.getenv('SLACK_TOKEN')
     SLACK_CHANNEL = os.getenv('SLACK_CHANNEL')
 

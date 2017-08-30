@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+from __future__ import print_function
+
 import json
-import threading
 import time
 
 from slacker import Slacker
@@ -11,12 +12,13 @@ from ws4py.client import WebSocketBaseClient
 from alec import config
 
 
-slack = Slacker(config.SLACK_TOKEN)
+slack = Slacker(config.SLACK_TOKEN) if config.SLACK_ENABLE else None
 
 
 def log(text):
     print(text)
-    slack.chat.post_message(config.SLACK_CHANNEL, text)
+    if slack:
+        slack.chat.post_message(config.SLACK_CHANNEL, text)
 
 
 class TickerMonitor(WebSocketBaseClient):
@@ -38,25 +40,26 @@ class TickerMonitor(WebSocketBaseClient):
             }))
             time.sleep(0.5)
 
-    def received_message(self, msg):
-        data = json.loads(msg.data)
+    def received_message(self, message):
+        data = json.loads(message.data)
         if 'event' in data:
             if data['event'] == 'subscribed':
                 self._chanId2symbol[data['chanId']] = data['symbol']
                 log('Pair %s at channel %d' % (data['pair'], data['chanId']))
 
-        if type(data) == list:
+        if isinstance(data, list):
             chan_id = data[0]
 
             if chan_id in self._chanId2symbol and data[1] != "hb":
                 self.process_tick(self._chanId2symbol[chan_id], data[1])
 
     def process_tick(self, symbol, data):
+        # pylint: disable=W0612
         (BID, BID_SIZE, ASK, ASK_SIZE, DAILY_CHANGE, DAILY_CHANGE_PERC,
          LAST_PRICE, VOLUME, HIGH, LOW) = data
 
         new_avg_price = (BID + ASK) / 2.0
-        if self._moving_average[symbol] > 0 and len(self._prices[symbol]):
+        if self._moving_average[symbol] > 0 and self._prices[symbol]:
             new_price_delta = new_avg_price - self._prices[symbol][-1]
             ratio = new_price_delta / self._moving_average[symbol]
             if abs(ratio) > self._threshold:

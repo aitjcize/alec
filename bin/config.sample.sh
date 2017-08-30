@@ -1,3 +1,4 @@
+export SLACK_ENABLE=false
 export SLACK_TOKEN=
 export SLACK_CHANNEL=
 
