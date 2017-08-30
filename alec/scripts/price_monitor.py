@@ -75,6 +75,8 @@ class TickerMonitor(WebSocketBaseClient):
 if __name__ == '__main__':
     log('=' * 30)
     log('TickerMonitor started')
-    ws = TickerMonitor(config.PRICE_MONITOR_PAIRS)
+    ws = TickerMonitor(config.PRICE_MONITOR_PAIRS,
+                       config.PRICE_MONITOR_THRESHOLD,
+                       config.PRICE_MONITOR_WINDOW_SIZE)
     ws.connect()
     ws.run()
