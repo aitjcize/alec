@@ -79,5 +79,7 @@ if __name__ == '__main__':
     ws = TickerMonitor(config.PRICE_MONITOR_PAIRS,
                        config.PRICE_MONITOR_THRESHOLD,
                        config.PRICE_MONITOR_WINDOW_SIZE)
-    ws.connect()
-    ws.run()
+    # Websocket disconnects itself sometimes. Connect in a while loop.
+    while True:
+        ws.connect()
+        ws.run()
