@@ -45,7 +45,6 @@ class TickerMonitor(WebSocketBaseClient):
         if 'event' in data:
             if data['event'] == 'subscribed':
                 self._chanId2symbol[data['chanId']] = data['symbol']
-                log('Pair %s at channel %d' % (data['pair'], data['chanId']))
 
         if isinstance(data, list):
             chan_id = data[0]
@@ -63,8 +62,8 @@ class TickerMonitor(WebSocketBaseClient):
             new_price_delta = new_avg_price - self._prices[symbol][-1]
             ratio = new_price_delta / self._moving_average[symbol]
             if abs(ratio) > self._threshold:
-                log('Pair %s price changed, ratio = %.2f%%' %
-                    (symbol, ratio * 100.0))
+                log('Pair %s price changed, price = %.3f, ratio = %.2f%%' %
+                    (symbol, LAST_PRICE, ratio * 1000.0))
 
         self._prices[symbol].append(new_avg_price)
         self._prices[symbol] = self._prices[symbol][- self._window_size:]
@@ -74,10 +73,10 @@ class TickerMonitor(WebSocketBaseClient):
 
 
 if __name__ == '__main__':
-    log('=' * 30)
     log('TickerMonitor started')
-    ws = TickerMonitor(config.PRICE_MONITOR_PAIRS,
-                       config.PRICE_MONITOR_THRESHOLD,
-                       config.PRICE_MONITOR_WINDOW_SIZE)
-    ws.connect()
-    ws.run()
+    while True:
+        ws = TickerMonitor(config.PRICE_MONITOR_PAIRS,
+                           config.PRICE_MONITOR_THRESHOLD,
+                           config.PRICE_MONITOR_WINDOW_SIZE)
+        ws.connect()
+        ws.run()
