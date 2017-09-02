@@ -1,17 +1,15 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 from __future__ import print_function
 
-import hashlib
-import hmac
-import json
 import time
 
 from slacker import Slacker
-from ws4py.client import WebSocketBaseClient
 
 from alec import config
+from api import rest_client
+from btfxwss import BtfxWss
 
 _SYMBOLS = [
     'fUSD'
@@ -26,78 +24,130 @@ def log(text):
         slack.chat.post_message(config.SLACK_CHANNEL, text)
 
 
-class RateMonitor(WebSocketBaseClient):
-    def __init__(self, symbols, threshold=0.01, window_size=30):
-        super(RateMonitor, self).__init__(config.BFX_WS_ENDPOINT)
-        self._threshold = threshold
-        self._window_size = window_size
+class RateMonitor():
+    def __init__(self, symbols):
         self._symbols = symbols
-        self._chanId2symbol = {}
-        self._prices = {x: [] for x in symbols}
-        self._moving_average = {x: 0 for x in symbols}
+        self._latest_ts = 0
+        self._latest_rate = 0.0
+        self.connect()
+        self.test = 0
 
-    def opened(self):
-        self.auth_key()
-        self.register_symbols()
-
-    def auth_key(self):
-        auth_nonce = str(time.time() * 1000)
-        auth_payload = 'AUTH' + auth_nonce
-        print(auth_payload)
-        auth_signature = hmac.new(config.BFX_API_SECRET, auth_payload,
-                                  hashlib.sha384).hexdigest()
-        print("sha: %s" % auth_signature)
-        self.send(json.dumps({
-            'event': 'auth',
-            'apiKey': config.BFX_API_KEY,
-            'authSig': auth_signature,
-            'authPayload': auth_payload,
-            'authNonce': auth_nonce
-        }))
-        time.sleep(0.5)
-
-    def register_symbols(self):
+    def connect(self):
+        self._wss = BtfxWss(key=config.BFX_API_KEY,
+                            secret=config.BFX_API_SECRET)
+        self._wss.start()
+        time.sleep(5)
+        self._wss.authenticate()
         for symbol in self._symbols:
-            self.send(json.dumps({
-                'event': 'subscribe',
-                'channel': 'trades',
-                'symbol': symbol
-            }))
+            self._wss.subscribe_to_trades(symbol)
+
+    def run(self):
+        while True:
+            self.check_account_info()
+            self.check_trades()
             time.sleep(0.5)
 
-    def received_message(self, message):
-        data = json.loads(message.data)
-        if 'event' in data:
-            if data['event'] == 'subscribed':
-                self._chanId2symbol[data['chanId']] = data['symbol']
-                log('Symbol %s at channel %d' %
-                    (data['symbol'], data['chanId']))
+    def check_account_info(self):
+        try:
+            wallets_q = self._wss.wallets
+            while not wallets_q.empty():
+                self.received_wallets(wallets_q.get())
+            credits_q = self._wss.credits
+            while not credits_q.empty():
+                self.received_credits(credits_q.get())
+            # Just pop the following queues since we use REST v1 for offers
+            q = self._wss.offer_new
+            while not q.empty():
+                q.get()
+            q = self._wss.offer_update
+            while not q.empty():
+                q.get()
+            q = self._wss.offer_cancel
+            while not q.empty():
+                q.get()
+        except KeyError:
+            pass
 
-        if isinstance(data, list):
-            chan_id = data[0]
+    def check_trades(self):
+        for symbol in self._symbols:
+            try:
+                trades_q = self._wss.trades(symbol)
+                while not trades_q.empty():
+                    self.received_trades(symbol, trades_q.get())
+            except KeyError:
+                pass
 
-            if chan_id in self._chanId2symbol:
-                if isinstance(data[1], list):
-                    for transaction in data[1]:
-                        self.process_funding_trade(
-                            self._chanId2symbol[chan_id], transaction)
-                elif data[1] == 'fte':
-                    self.process_funding_trade(self._chanId2symbol[chan_id],
-                                               data[2])
+    def received_wallets(self, message):
+        data, ts = message
+        for wallet in data[1]:
+            (TYPE, SYMBOL, AMOUNT, INTEREST, AVAILABLE) = wallet
+            if TYPE == 'funding' and SYMBOL == 'USD':
+                self._funding_usd = AMOUNT
+        log("Funding usd: %f" % self._funding_usd)
+
+    def received_credits(self, message):
+        data, ts = message
+        self._funding_usd_lent = 0
+        for credit in data[1]:
+            used_fields = credit[0:10]
+            (ID, SYMBOL, SIDE, MTS_CREATE, MTS_UPDATE, AMOUNT, FLAGS, STATUS,
+                    RATE, PERIOD) = used_fields
+            if SYMBOL == 'fUSD':
+                self._funding_usd_lent += AMOUNT
+        log("Funding usd lent: %f" % self._funding_usd_lent)
+
+    def received_trades(self, symbol, message):
+        data, ts = message
+        if isinstance(data[0], list):
+            for transaction in data[0]:
+                self.process_funding_trade(symbol, transaction)
+        elif data[0] == 'fte':
+            self.process_funding_trade(symbol, data[1])
+            self.lend_strategy()
 
     def process_funding_trade(self, symbol, data):
         # pylint: disable=W0612
         (ID, MTS, AMOUNT, RATE, PERIOD) = data
-        print("%s: Timestamp: %s, Rate: %f, Period: %d, Amount: %f" % (
+        log("%s: Timestamp: %s, Rate: %f, Period: %d, Amount: %f" % (
             symbol, time.strftime("%H:%M:%S", time.localtime(MTS / 1000)),
-            RATE, PERIOD, abs(AMOUNT)))
+            RATE * 100, PERIOD, abs(AMOUNT)))
 
-    def handshake_ok(self):
-        pass
+        if MTS > self._latest_ts:
+            self._latest_ts = MTS
+            self._latest_rate = RATE
+
+    def lend_strategy(self):
+        # Re-write the strategy by yourself
+        if self.test == 0:
+            offer_id = self.new_offer('USD', 0.5, 1, 2)
+            time.sleep(5)
+            self.cancel_offer(offer_id)
+            self.test = 1
+
+    def new_offer(self, currency, amount, rate, period):
+        """Create an new offer
+        :param rate: Rate per day
+        """
+        try:
+            result = rest_client.new_offer(currency, amount, rate, period)
+            log('Create an new %s offer with amount: %f, rate: %f, period: %d' % (
+                currency, amount, rate, period))
+        except BitfinexClientError:
+            log(result)
+            raise
+        return result['offer_id']
+
+    def cancel_offer(self, offer_id):
+        """Cancel an offer"""
+        try:
+            result = rest_client.cancel_offer(offer_id)
+            log('Cancel an offer with id: %d' % offer_id)
+        except BitfinexClientError:
+            log(result)
+            raise
 
 if __name__ == '__main__':
     log('=' * 30)
     log('RateMonitor started')
-    ws = RateMonitor(_SYMBOLS)
-    ws.connect()
-    ws.run()
+    monitor = RateMonitor(_SYMBOLS)
+    monitor.run()
