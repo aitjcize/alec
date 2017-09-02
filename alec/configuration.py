@@ -20,3 +20,6 @@ class Config(object):
         ast.literal_eval(os.getenv('PRICE_MONITOR_PAIRS')) or
         ['tBTCUSD', 'tETHUSD', 'tBCHUSD', 'tXMRUSD', 'tIOTUSD', 'tXRPUSD',
          'tOMGUSD', 'tDSHUSD', 'tEOSUSD', 'tETCUSD', 'tZECUSD', 'tSANUSD'])
+    RATE_MONITOR_SYMBOLS = (
+        ast.literal_eval(os.getenv('RATE_MONITOR_SYMBOLS')) or
+        ['fUSD'])
