@@ -15,10 +15,17 @@ $ source bin/env.sh
 $ pip install -r requirements.txt
 ```
 
-Now evertime you want to start development, just do
+Now every time you want to start development, just do
 
 ```bash
 $ source bin/env.sh
 ```
 
 and the config and PATH will be set for you.
+
+Useful Commands
+---------------
+
+1. `profit_calc`: calculate profit according ledger csv file.
+2. `price_monitor`: monitors trading price.
+3. `rate_monitor`: monitor margin funding price.
