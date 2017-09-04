@@ -9,7 +9,8 @@ from btfxwss import BtfxWss
 from slacker import Slacker
 
 from alec import config
-from api import BitfinexClientV1, BitfinexClientError
+from alec.api import BitfinexClientError
+from alec.api import v1_rest
 
 slack = Slacker(config.SLACK_TOKEN) if config.SLACK_ENABLE else None
 
@@ -22,7 +23,7 @@ def log(text):
 
 class RateMonitor(object):
     def __init__(self, symbols):
-        self._rest_client = BitfinexClientV1()
+        self._rest_client = v1_rest.FullApi()
         self._wss = None
         self._symbols = symbols
         self._latest_ts = 0

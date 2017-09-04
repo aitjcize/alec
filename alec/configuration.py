@@ -17,9 +17,9 @@ class Config(object):
     PRICE_MONITOR_THRESHOLD = float(os.getenv('PRICE_MONITOR_THRESHOLD', 0.01))
     PRICE_MONITOR_WINDOW_SIZE = int(os.getenv('PRICE_MONITOR_WINDOW_SIZE', 30))
     PRICE_MONITOR_PAIRS = (
-        ast.literal_eval(os.getenv('PRICE_MONITOR_PAIRS')) or
+        ast.literal_eval(os.getenv('PRICE_MONITOR_PAIRS', 'None')) or
         ['tBTCUSD', 'tETHUSD', 'tBCHUSD', 'tXMRUSD', 'tIOTUSD', 'tXRPUSD',
          'tOMGUSD', 'tDSHUSD', 'tEOSUSD', 'tETCUSD', 'tZECUSD', 'tSANUSD'])
     RATE_MONITOR_SYMBOLS = (
-        ast.literal_eval(os.getenv('RATE_MONITOR_SYMBOLS')) or
+        ast.literal_eval(os.getenv('RATE_MONITOR_SYMBOLS', 'None')) or
         ['fUSD'])
