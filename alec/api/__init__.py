@@ -1,0 +1,2 @@
+class BitfinexClientError(Exception):
+    pass
