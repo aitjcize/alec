@@ -3,6 +3,7 @@
 from __future__ import print_function
 import collections
 import datetime
+import decimal
 import hashlib
 import hmac
 import json
@@ -43,6 +44,8 @@ class BitfinexApiResponse(object):
     def set(self, key, value):
         if key in ['time', 'created', 'updated', 'opening', 'last_payout']:
             value = Timestamp(value)
+        if key in ['amount', 'amount_orig', 'balance', 'rate']:
+            value = decimal.Decimal(value)
         setattr(self, key, value)
 
     def __repr__(self):
@@ -54,6 +57,16 @@ class BitfinexApiResponse(object):
                 fields.append('%s=%r' % (key, getattr(self, key)))
         s = '<%s(%s)>' % (self.__class__.__name__, ', '.join(fields))
         return s
+
+
+class Trade(BitfinexApiResponse):
+    FIELDS = [
+        'id',
+        'time',
+        'amount',
+        'rate',
+        'period',
+    ]
 
 
 class Candle(BitfinexApiResponse):

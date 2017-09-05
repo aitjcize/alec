@@ -3,6 +3,7 @@
 from __future__ import print_function
 import base64
 import collections
+import decimal
 import hashlib
 import hmac
 import json
@@ -36,7 +37,7 @@ class PublicApi(object):
                     'original_amount', 'remaining_amount', 'executed_amount',
                     'amount_lent', 'amount_used'
             ]:
-                v = float(v)
+                v = decimal.Decimal(v)
 
             # time
             if k in ['timestamp', 'timestamp_created']:
