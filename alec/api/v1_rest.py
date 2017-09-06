@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from __future__ import print_function
+import argparse
 import base64
-import collections
 import decimal
 import hashlib
 import hmac
 import json
+import logging
 import time
 
 import requests
@@ -14,37 +15,73 @@ import requests
 from alec import config
 from alec.api import BitfinexClientError
 
+logger = logging.getLogger(__name__)
+
+MAX_RETRY = 5
+
+
+def rate_limit(period):
+    last_call_time = {}
+
+    def decorator(func):
+        def wrapper(*args, **kargs):
+            now = time.time()
+            delta = now - last_call_time.get(func, 0)
+            last_call_time[func] = now
+            if delta < period:
+                logger.warning(
+                    '%s was called too frequently. delay %s seconds',
+                    func.__name__, period - delta)
+                time.sleep(period - delta)
+            return func(*args, **kargs)
+
+        return wrapper
+
+    return decorator
+
 
 class PublicApi(object):
     BASE_URL = 'https://api.bitfinex.com/'
 
     def public_req(self, path, params=None):
         url = self.BASE_URL + path
-        resp = requests.get(url, params, verify=True)
+        logger.debug('public_req %s %s', path, params)
+
+        for i in range(MAX_RETRY):
+            resp = requests.get(url, params, verify=True)
+            if 500 <= resp.status_code <= 599:
+                logger.warning('server error, sleep a while')
+                time.sleep(2**i)
+                continue
+            break
+
+        logger.debug('response %d %s', resp.status_code, resp.content)
         if resp.status_code != 200:
-            raise BitfinexClientError(resp.text)
+            raise BitfinexClientError('%s %s' % (resp.status_code, resp.text))
         return resp.json()
 
     def _normalize(self, d):
         if isinstance(d, list):
-            return map(self._normalize, d)
+            return list(map(self._normalize, d))
 
         result = {}
         for k, v in d.items():
+            if isinstance(v, list):
+                v = self._normalize(v)
+
             # decimal
-            if k in [
-                    'amount', 'balance', 'fee_amount', 'fee',
-                    'original_amount', 'remaining_amount', 'executed_amount',
-                    'amount_lent', 'amount_used'
+            elif 'amount' in k or '_fees' in k or k in [
+                    'balance',
+                    'fee',
             ]:
                 v = decimal.Decimal(v)
 
             # time
-            if k in ['timestamp', 'timestamp_created']:
+            elif k in ['timestamp', 'timestamp_created']:
                 v = float(v)
 
             # misc number
-            if k in ['rate', 'period']:
+            elif k in ['rate', 'period']:
                 v = float(v)
 
             result[k] = v
@@ -87,13 +124,28 @@ class AuthedReadonlyApi(PublicApi):
             "X-BFX-PAYLOAD": payload,
         }
 
-    def auth_req(self, path, params={}):
+    def auth_req(self, path, params=None, allow_retry=False):
         assert path.startswith('v1/')
-        headers = self._headers(path, params)
         url = self.BASE_URL + path
-        resp = requests.post(url, headers=headers, verify=True)
+        logger.debug('auth_req %s %s', path, params)
+
+        for i in range(MAX_RETRY):
+            headers = self._headers(path, params or {})
+            resp = requests.post(url, headers=headers, verify=True)
+            if allow_retry:
+                if 500 <= resp.status_code <= 599:
+                    logger.warning('server error, sleep a while')
+                    time.sleep(2**i)
+                    continue
+                if resp.status_code == 400 and 'Ratelimit' in resp.text:
+                    logger.warning('hit rate limit, sleep 20 seconds')
+                    time.sleep(20)
+                    continue
+            break
+
+        logger.debug('response %d %s', resp.status_code, resp.content)
         if resp.status_code != 200:
-            raise BitfinexClientError(resp.text)
+            raise BitfinexClientError('%s %s' % (resp.status_code, resp.text))
         return resp.json()
 
     def is_currency(self, currency):
@@ -103,8 +155,37 @@ class AuthedReadonlyApi(PublicApi):
         # funding=deposit
         return wallet in ['trading', 'exchange', 'deposit', 'funding']
 
+    def account_info(self):
+        return self._normalize(
+            self.auth_req('v1/account_infos', allow_retry=True))
+
+    def account_fees(self):
+        return self._normalize(
+            self.auth_req('v1/account_fees', allow_retry=True))
+
+    def summary(self):
+        return self._normalize(self.auth_req('v1/summary', allow_retry=True))
+
+    def key_info(self):
+        return self._normalize(self.auth_req('v1/key_info', allow_retry=True))
+
+    def margin_info(self):
+        return self._normalize(
+            self.auth_req('v1/margin_infos', allow_retry=True))
+
     def balances(self):
-        return self._normalize(self.auth_req('v1/balances'))
+        return self._normalize(self.auth_req('v1/balances', allow_retry=True))
+
+    def orders(self):
+        return self._normalize(self.auth_req('v1/orders', allow_retry=True))
+
+    @rate_limit(60)
+    def orders_history(self):
+        return self._normalize(
+            self.auth_req('v1/orders/hist', allow_retry=True))
+
+    def positions(self):
+        return self._normalize(self.auth_req('v1/positions', allow_retry=True))
 
     def history(self,
                 currency,
@@ -125,7 +206,8 @@ class AuthedReadonlyApi(PublicApi):
             params['wallet'] = wallet
         if limit:
             params['limit'] = limit
-        return self._normalize(self.auth_req('v1/history', params))
+        return self._normalize(
+            self.auth_req('v1/history', params, allow_retry=True))
 
     def movements(self,
                   currency,
@@ -139,10 +221,14 @@ class AuthedReadonlyApi(PublicApi):
         params = dict(currency=currency)
         if method:
             params['method'] = method
+        if since:
+            params['since'] = since
+        if until:
+            params['until'] = until
         if limit:
             params['limit'] = limit
-        assert not (since or until), 'not implemented'
-        return self._normalize(self.auth_req('v1/history/movements', params))
+        return self._normalize(
+            self.auth_req('v1/history/movements', params, allow_retry=True))
 
     def mytrades(self,
                  symbol,
@@ -157,31 +243,38 @@ class AuthedReadonlyApi(PublicApi):
             params['until'] = until
         if limit_trades:
             params['limit_trades'] = limit_trades
-        return self._normalize(self.auth_req('v1/mytrades'))
+        return self._normalize(self.auth_req('v1/mytrades', allow_retry=True))
 
     def credits(self):
         """View your funds currently taken (active credits)."""
-        return self._normalize(self.auth_req('v1/credits'))
+        return self._normalize(self.auth_req('v1/credits', allow_retry=True))
 
     def offers(self):
         """View your active offers."""
-        return self._normalize(self.auth_req('v1/offers'))
+        return self._normalize(self.auth_req('v1/offers', allow_retry=True))
 
+    @rate_limit(60)
     def offers_history(self, limit=None):
         """View your latest inactive offers.
 
         Limited to last 3 days and 1 request per minute.
         """
-        return self._normalize(self.auth_req('v1/offers/hist'))
+        params = {}
+        if limit:
+            params['limit'] = limit
+        return self._normalize(
+            self.auth_req('v1/offers/hist', params, allow_retry=True))
 
     def mytrades_funding(self, symbol):
         """View your past trades."""
         params = dict(symbol=symbol)
-        return self._normalize(self.auth_req('v1/mytrades_funding', params))
+        return self._normalize(
+            self.auth_req('v1/mytrades_funding', params, allow_retry=True))
 
     def taken_funds(self):
         """active margin funds"""
-        return self._normalize(self.auth_req('v1/taken_funds'))
+        return self._normalize(
+            self.auth_req('v1/taken_funds', allow_retry=True))
 
 
 class FullApi(AuthedReadonlyApi):
@@ -205,26 +298,55 @@ class FullApi(AuthedReadonlyApi):
 
 
 def example():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--debug', action='store_true')
+    opts = parser.parse_args()
+
+    if opts.debug:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig()
+
     bfx = AuthedReadonlyApi()
 
-    print('lends')
-    for x in bfx.lends('USD'):
-        print(x)
-    print()
+    def output(title, result):
+        print('-' * 5, title, '-' * 5)
+        if isinstance(result, list):
+            for x in result:
+                print(x)
+        else:
+            print(result)
+        print()
 
-    print('symbols')
-    print(bfx.symbols())
-    print()
+    print('=' * 10, 'public', '=' * 10)
+    output('lends', bfx.lends('USD', limit=5))
+    output('symbols', bfx.symbols())
 
-    print('balances')
-    for x in bfx.balances():
-        print(x)
-    print()
+    print('=' * 10, 'authed', '=' * 10)
+    output('account info', bfx.account_info())
+    output('account fees', bfx.account_fees())
+    output('summary', bfx.summary())
+    output('key info', bfx.key_info())
+    output('margin info', bfx.margin_info())
 
-    print('history')
-    for x in bfx.history('USD', wallet='funding'):
-        print(x)
-    print()
+    # balance
+    output('balances', bfx.balances())
+    output('balance history', bfx.history('USD', wallet='funding'))
+    output('movements', bfx.movements('BTC'))
+
+    # exchange
+    output('orders', bfx.orders())
+    output('orders history', bfx.orders_history())
+
+    # position
+    output('positions', bfx.positions())
+
+    # funding
+    output('active credits', bfx.credits())
+    output('active offsers', bfx.offers())
+    output('offers history', bfx.offers_history())
+    output('mytrades funding', bfx.mytrades_funding('USD'))
+    output('taken funds', bfx.taken_funds())
 
 
 if __name__ == '__main__':

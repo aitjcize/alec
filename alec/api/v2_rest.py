@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from __future__ import print_function
-import collections
+import argparse
 import datetime
 import decimal
 import hashlib
 import hmac
 import json
+import logging
 import re
 import time
 
@@ -15,11 +16,13 @@ import requests
 from alec import config
 from alec.api import BitfinexClientError
 
+logger = logging.getLogger(__name__)
+
+MAX_RETRY = 5
+
 
 class Timestamp(float):
     def __new__(cls, value):
-        if value is None:
-            return None
         # v2 always use millisecond
         return float.__new__(cls, value / 1000.0)
 
@@ -35,17 +38,21 @@ class BitfinexApiResponse(object):
         for i, key in enumerate(self.FIELDS):
             value = values[i]
             if not key:  # unknown
-                if value not in [0, 1, None]:
+                if value not in [0, None]:
                     print('unknown %s.field[%d] has non trivial value (%r)' %
                           (self.__class__.__name__, i, value))
                 continue
             self.set(key, value)
 
     def set(self, key, value):
-        if key in ['time', 'created', 'updated', 'opening', 'last_payout']:
+        if value is None:
+            pass
+        elif key in ['time', 'created', 'updated', 'opening', 'last_payout']:
             value = Timestamp(value)
-        if key in ['amount', 'amount_orig', 'balance', 'rate']:
-            value = decimal.Decimal(value)
+        elif key in ['amount', 'amount_orig', 'balance', 'rate', 'rate_real']:
+            # `value` is (inaccurate) float but we don't want the exact
+            # inaccurate value. Cast to str to get approximated decimal string.
+            value = decimal.Decimal(str(value))
         setattr(self, key, value)
 
     def __repr__(self):
@@ -92,28 +99,27 @@ class Wallet(BitfinexApiResponse):
 
 class FundingOffer(BitfinexApiResponse):
     FIELDS = [
-        'id',           # Offer ID
-        'symbol',       # The currency of the offer (fUSD, etc)
-        'created',      # Time Stamp when the offer was created
-        'updated',      # Time Stamp when the offer was created
-        'amount',       # Amount the offer is for
+        'id',  # Offer ID
+        'symbol',  # The currency of the offer (fUSD, etc)
+        'created',  # Time Stamp when the offer was created
+        'updated',  # Time Stamp when the offer was created
+        'amount',  # Amount the offer is for
         'amount_orig',  # Amount the offer was entered with originally
-        'type',         #
-        '',             # None
-        '',             # None
-        '',             # 0
-        'status',       # Offer Status: ACTIVE, EXECUTED, PARTIALLY FILLED,
-                        #     CANCELED
-        '',             # None
-        '',             # None
-        '',             # None
-        'rate',         # offer rate(day), may change if FRR
-        'period',       # Period of the offer
-        '',             # 0
-        '',             # 0
-        '',             # None
-        '',             # 0
-        'rate_real',    # rate(day)
+        'type',
+        '',
+        '',
+        '',
+        'status',  # Offer Status: ACTIVE, EXECUTED, PARTIALLY FILLED, CANCELED
+        '',
+        '',
+        '',
+        'rate',  # offer rate(day), may change if FRR
+        'period',  # Period of the offer
+        '',
+        '',
+        '',
+        '',
+        'rate_real',  # rate(day)
     ]
 
 
@@ -172,14 +178,38 @@ class FundingTrade(BitfinexApiResponse):
 class PublicApi(object):
     BASE_URL = 'https://api.bitfinex.com/'
 
+    def _req(self, method, url, params=None, headers=None, allow_retry=False):
+        assert method in ['GET', 'POST']
+        for i in range(5):
+            if method == 'GET':
+                resp = requests.get(url, params, headers=headers, verify=True)
+            else:
+                resp = requests.post(url, params, headers=headers, verify=True)
+            if allow_retry and 500 <= resp.status_code <= 599:
+                logger.warning('server error, sleep a while')
+                time.sleep(2**i)
+                continue
+            break
+        return resp
+
     def is_symbol(self, symbol):
         return bool(re.match(r'^[ft][A-Z]+$', symbol))
 
     def public_req(self, path, params=None):
         url = self.BASE_URL + path
-        resp = requests.get(url, params, verify=True)
+        logger.debug('public_req %s %s', path, params)
+
+        for i in range(MAX_RETRY):
+            resp = requests.get(url, params, verify=True)
+            if 500 <= resp.status_code <= 599:
+                logger.warning('server error, sleep a while')
+                time.sleep(2**i)
+                continue
+            break
+
+        logger.debug('response %d %s', resp.status_code, resp.content)
         if resp.status_code != 200:
-            raise BitfinexClientError(resp.text)
+            raise BitfinexClientError('%s %s' % (resp.status_code, resp.text))
         return resp.json()
 
     def candles(self,
@@ -235,20 +265,31 @@ class AuthedReadonlyApi(PublicApi):
             "content-type": "application/json"
         }
 
-    def auth_req(self, path, params={}):
-        nonce = self._nonce()
-        body = params
+    def auth_req(self, path, params=None, allow_retry=False):
+        logger.debug('auth_req %s %s', path, params)
+        body = params or {}
         rawBody = json.dumps(body)
-        headers = self._headers(path, nonce, rawBody)
         url = self.BASE_URL + path
-        resp = requests.post(url, headers=headers, data=rawBody, verify=True)
+
+        for i in range(MAX_RETRY):
+            nonce = self._nonce()
+            headers = self._headers(path, nonce, rawBody)
+            resp = requests.post(url, rawBody, headers=headers, verify=True)
+            if allow_retry:
+                if 500 <= resp.status_code <= 599:
+                    logger.warning('server error, sleep a while')
+                    time.sleep(2**i)
+                    continue
+            break
+
+        logger.debug('response %d %s', resp.status_code, resp.content)
         if resp.status_code != 200:
-            raise BitfinexClientError(resp.text)
+            raise BitfinexClientError('%s %s' % (resp.status_code, resp.text))
         return resp.json()
 
     def wallets(self):
         """Get account wallets"""
-        wallets = self.auth_req('v2/auth/r/wallets')
+        wallets = self.auth_req('v2/auth/r/wallets', allow_retry=True)
         for i, wallet in enumerate(wallets):
             wallets[i] = Wallet(wallet)
         return wallets
@@ -256,19 +297,22 @@ class AuthedReadonlyApi(PublicApi):
     def orders(self, symbol=''):
         """Get active orders"""
         assert symbol == '' or self.is_symbol(symbol)
-        return self.auth_req('v2/auth/r/orders/%s' % symbol)
+        return self.auth_req('v2/auth/r/orders/%s' % symbol, allow_retry=True)
 
     def orders_history(self, symbol=''):
         """Get orders history"""
         assert symbol == '' or self.is_symbol(symbol)
         if symbol:
-            return self.auth_req('v2/auth/r/orders/%s/hist' % symbol)
+            result = self.auth_req(
+                'v2/auth/r/orders/%s/hist' % symbol, allow_retry=True)
         else:
-            return self.auth_req('v2/auth/r/orders/hist')
+            result = self.auth_req('v2/auth/r/orders/hist', allow_retry=True)
+        return result
 
     def funding_offers(self, symbol=''):
         assert symbol == '' or self.is_symbol(symbol)
-        offers = self.auth_req('v2/auth/r/funding/offers/%s' % symbol)
+        offers = self.auth_req(
+            'v2/auth/r/funding/offers/%s' % symbol, allow_retry=True)
         for i, offer in enumerate(offers):
             offers[i] = FundingOffer(offer)
         return offers
@@ -276,21 +320,26 @@ class AuthedReadonlyApi(PublicApi):
     def funding_offers_history(self, symbol=None):
         if symbol:
             assert self.is_symbol(symbol)
-            offers = self.auth_req('v2/auth/r/funding/offers/%s/hist' % symbol)
+            offers = self.auth_req(
+                'v2/auth/r/funding/offers/%s/hist' % symbol, allow_retry=True)
         else:
-            offers = self.auth_req('v2/auth/r/funding/offers/hist')
+            offers = self.auth_req(
+                'v2/auth/r/funding/offers/hist', allow_retry=True)
         for i, offer in enumerate(offers):
             offers[i] = FundingOffer(offer)
         return offers
 
     def funding_credits(self, symbol):
-        credits = self.auth_req('v2/auth/r/funding/credits/%s' % symbol)
+        # pylint: disable=W0622
+        credits = self.auth_req(
+            'v2/auth/r/funding/credits/%s' % symbol, allow_retry=True)
         for i, credit in enumerate(credits):
             credits[i] = Credit(credit)
         return credits
 
     def funding_credits_history(self, symbol, start=None, end=None,
                                 limit=None):
+        # pylint: disable=W0622
         params = dict()
         if start:
             params['start'] = start
@@ -298,8 +347,10 @@ class AuthedReadonlyApi(PublicApi):
             params['end'] = end
         if limit:
             params['limit'] = limit
-        credits = self.auth_req('v2/auth/r/funding/credits/%s/hist' % symbol,
-                                params)
+        credits = self.auth_req(
+            'v2/auth/r/funding/credits/%s/hist' % symbol,
+            params,
+            allow_retry=True)
         for i, credit in enumerate(credits):
             credits[i] = Credit(credit)
         return credits
@@ -309,15 +360,18 @@ class AuthedReadonlyApi(PublicApi):
         One "offer" may generate several "trades".
         """
         if symbol:
-            trades = self.auth_req('v2/auth/r/funding/trades/%s/hist' % symbol)
+            trades = self.auth_req(
+                'v2/auth/r/funding/trades/%s/hist' % symbol, allow_retry=True)
         else:
-            trades = self.auth_req('v2/auth/r/funding/trades/hist')
+            trades = self.auth_req(
+                'v2/auth/r/funding/trades/hist', allow_retry=True)
         for i, trade in enumerate(trades):
             trades[i] = FundingTrade(trade)
         return trades
 
     def funding_info(self, symbol):
-        info = self.auth_req('v2/auth/r/info/funding/%s' % symbol)
+        info = self.auth_req(
+            'v2/auth/r/info/funding/%s' % symbol, allow_retry=True)
         return FundingInfo(info)
 
 
@@ -327,47 +381,38 @@ class FullApi(AuthedReadonlyApi):
 
 
 def example():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--debug', action='store_true')
+    opts = parser.parse_args()
+
+    if opts.debug:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig()
+
     bfx = AuthedReadonlyApi()
 
-    print('candle')
-    print(bfx.candles('1m', 'tETHUSD', 'last'))
-    for candle in bfx.candles('1m', 'tETHUSD', 'hist', limit=3):
-        print(candle)
-    print()
+    def output(title, result):
+        print('-' * 5, title, '-' * 5)
+        if isinstance(result, list):
+            for x in result:
+                print(x)
+        else:
+            print(result)
+        print()
 
-    print('wallets')
-    for wallet in bfx.wallets():
-        print(wallet)
-    print()
+    print('=' * 10, 'public', '=' * 10)
+    output('candle(last)', bfx.candles('1m', 'tETHUSD', 'last'))
+    output('candle(hist)', bfx.candles('1m', 'tETHUSD', 'hist', limit=3))
 
-    print('active offers')
-    for o in bfx.funding_offers():
-        print(o)
-    print()
-
-    print('offers history')
-    for o in bfx.funding_offers_history('fUSD'):
-        print(o)
-    print()
-
-    print('offers credit')
-    for c in bfx.funding_credits('fUSD'):
-        print(c)
-    print()
-
-    print('offers credit history')
-    for c in bfx.funding_credits_history('fUSD'):
-        print(c)
-    print()
-
-    print('funding info')
-    print(bfx.funding_info('fUSD'))
-    print()
-
-    print('funding trades')
-    for x in bfx.funding_trades():
-        print(x)
-    print()
+    print('=' * 10, 'authed', '=' * 10)
+    output('wallets', bfx.wallets())
+    output('active offers', bfx.funding_offers())
+    output('offers history', bfx.funding_offers_history('fUSD'))
+    output('offers credit', bfx.funding_credits('fUSD'))
+    output('offers credit history', bfx.funding_credits_history('fUSD'))
+    output('funding info', bfx.funding_info('fUSD'))
+    output('funding trades', bfx.funding_trades())
 
 
 if __name__ == '__main__':
