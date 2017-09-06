@@ -6,6 +6,8 @@ from __future__ import print_function
 import json
 import time
 
+import requests
+
 from slacker import Slacker
 from ws4py.client import WebSocketBaseClient
 
@@ -52,6 +54,14 @@ class TickerMonitor(WebSocketBaseClient):
             if chan_id in self._chanId2symbol and data[1] != "hb":
                 self.process_tick(self._chanId2symbol[chan_id], data[1])
 
+    def kraken_ask_bid(self, pair):
+        KRAKEN_URL = 'https://api.kraken.com/0/public/Ticker?pair=%s'
+        pair_name = 'X%sZ%s' % (pair[:3].upper(), pair[3:].upper())
+
+        data = requests.get(KRAKEN_URL % pair).json()['result'][pair_name]
+        ask, bid = float(data['a'][0]), float(data['b'][0])
+        return (ask, bid)
+
     def process_tick(self, symbol, data):
         # pylint: disable=W0612
         (BID, BID_SIZE, ASK, ASK_SIZE, DAILY_CHANGE, DAILY_CHANGE_PERC,
@@ -70,6 +80,14 @@ class TickerMonitor(WebSocketBaseClient):
         self._moving_average[symbol] = (sum(self._prices[symbol]) /
                                         len(self._prices[symbol]))
         print('MA[%s]: %.2f' % (symbol, self._moving_average[symbol]))
+
+        if symbol == 'tETHUSD':
+            (ask, bid) = self.kraken_ask_bid('ethusd')
+
+            # means we can buy on kraken and sell higher on bitfinex
+            if ask < BID:
+                log('Kraken ask price %.3f, Bitfinex bid price %.3f, difference %.2f%%' %
+                    (ask, BID, (BID-ask) / BID * 100.0))
 
 
 if __name__ == '__main__':
