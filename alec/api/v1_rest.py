@@ -71,6 +71,7 @@ class PublicApi(object):
 
             # decimal
             elif 'amount' in k or '_fees' in k or k in [
+                    'available',
                     'balance',
                     'fee',
             ]:
