@@ -11,7 +11,8 @@ from slacker import Slacker
 
 from alec import config
 from alec.api import BitfinexClientError
-from alec.api import v1_rest, v2_rest
+from alec.api import bitfinex_v1_rest
+from alec.api import bitfinex_v2_rest
 
 slack = Slacker(config.SLACK_TOKEN) if config.SLACK_ENABLE else None
 
@@ -25,7 +26,7 @@ def log(text):
 class RateMonitor(object):
     def __init__(self, symbols):
         self.DEBUG = True
-        self._rest_client = v1_rest.FullApi()
+        self._rest_client = bitfinex_v1_rest.FullApi()
         self._wss = None
         self._symbols = symbols
         self._funding = {}
@@ -168,7 +169,7 @@ class RateMonitor(object):
     def process_wallet(self, data):
         if self.DEBUG:
             print(data)
-        wallet = v2_rest.Wallet(data)
+        wallet = bitfinex_v2_rest.Wallet(data)
         if wallet.wallet_type == 'funding' and wallet.currency == 'USD':
             self._funding['total'] = wallet.balance
             log("Funding usd: %f" % self._funding['total'])
@@ -176,7 +177,7 @@ class RateMonitor(object):
     def process_credit(self, data):
         if self.DEBUG:
             print(data)
-        credit = v2_rest.Credit(data)
+        credit = bitfinex_v2_rest.Credit(data)
         if credit.symbol == 'fUSD':
             if credit.status == 'ACTIVE':
                 self._credits[credit.id] = credit.amount
@@ -191,7 +192,7 @@ class RateMonitor(object):
     def process_offer(self, data):
         if self.DEBUG:
             print(data)
-        offer = v2_rest.FundingOffer(data)
+        offer = bitfinex_v2_rest.FundingOffer(data)
         if offer.symbol == 'fUSD':
             if offer.status == 'ACTIVE':
                 if offer.id not in self._offers:
@@ -210,7 +211,7 @@ class RateMonitor(object):
                     del self._offers[offer.id]
 
     def process_public_trade(self, symbol, data):
-        trade = v2_rest.Trade(data)
+        trade = bitfinex_v2_rest.Trade(data)
         log("%s: Timestamp: %s, Rate: %f, Period: %d, Amount: %f" % (
             symbol, time.strftime("%H:%M:%S", time.localtime(trade.time)),
             trade.rate * 100, trade.period, abs(trade.amount)))
