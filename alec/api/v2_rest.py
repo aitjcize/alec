@@ -212,6 +212,12 @@ class PublicApi(object):
             raise BitfinexClientError('%s %s' % (resp.status_code, resp.text))
         return resp.json()
 
+    def trades(self, symbol):
+        trades = self.public_req('v2/trades/%s/hist' % symbol)
+        for i, trade in enumerate(trades):
+            trades[i] = Trade(trade)
+        return trades
+
     def candles(self,
                 time_frame,
                 symbol,
@@ -402,6 +408,7 @@ def example():
         print()
 
     print('=' * 10, 'public', '=' * 10)
+    output('trades', bfx.trades('fUSD'))
     output('candle(last)', bfx.candles('1m', 'tETHUSD', 'last'))
     output('candle(hist)', bfx.candles('1m', 'tETHUSD', 'hist', limit=3))
 
