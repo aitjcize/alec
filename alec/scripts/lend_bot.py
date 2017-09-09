@@ -10,7 +10,8 @@ import time
 from slacker import Slacker
 
 from alec import config
-from alec.api import v1_rest, v2_rest
+from alec.api import bitfinex_v1_rest
+from alec.api import bitfinex_v2_rest
 
 slack = Slacker(config.SLACK_TOKEN) if config.SLACK_ENABLE else None
 logger = logging.getLogger(__name__)
@@ -26,8 +27,8 @@ class LendBot(object):
     NORMAL_INTERVAL = 60
 
     def __init__(self, currency):
-        self._v1_client = v1_rest.FullApi()
-        self._v2_client = v2_rest.PublicApi()
+        self._v1_client = bitfinex_v1_rest.FullApi()
+        self._v2_client = bitfinex_v2_rest.PublicApi()
         self._currency = currency
         self._wallet = []
         self._credits = []
