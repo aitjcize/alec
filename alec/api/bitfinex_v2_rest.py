@@ -76,6 +76,77 @@ class Trade(BitfinexApiResponse):
     ]
 
 
+class TradingBook(BitfinexApiResponse):
+    FIELDS = [
+        'price',
+        'count',
+        'amount',
+    ]
+
+
+class FundingBook(BitfinexApiResponse):
+    FIELDS = [
+        'rate',
+        'period',
+        'count',
+        'amount',
+    ]
+
+
+class TradingTicker(BitfinexApiResponse):
+    FIELDS = [
+        'symbol',
+        'bid',
+        'bid_size',
+        'ask',
+        'ask_size',
+        'daily_change',
+        'daily_change_perc',
+        'last_price',
+        'volume',
+        'high',
+        'low',
+    ]
+
+
+class FundingTicker(BitfinexApiResponse):
+    FIELDS = [
+        'symbol',
+        'frr',
+        'bid',
+        'bid_period',
+        'bid_size',
+        'ask',
+        'ask_period',
+        'ask_size',
+        'daily_change',
+        'daily_change_perc',
+        'last_price',
+        'volume',
+        'high',
+        'low',
+    ]
+
+
+class Ticker(BitfinexApiResponse):
+    FIELDS = [
+        'symbol',
+        'frr',
+        'bid',
+        'bid_period',
+        'bid_size',
+        'ask',
+        'ask_period',
+        'ask_size',
+        'daily_change',
+        'daily_change_perc',
+        'last_price',
+        'volume',
+        'high',
+        'low',
+    ]
+
+
 class Candle(BitfinexApiResponse):
     FIELDS = [
         'time',
@@ -178,22 +249,14 @@ class FundingTrade(BitfinexApiResponse):
 class PublicApi(object):
     BASE_URL = 'https://api.bitfinex.com/'
 
-    def _req(self, method, url, params=None, headers=None, allow_retry=False):
-        assert method in ['GET', 'POST']
-        for i in range(5):
-            if method == 'GET':
-                resp = requests.get(url, params, headers=headers, verify=True)
-            else:
-                resp = requests.post(url, params, headers=headers, verify=True)
-            if allow_retry and 500 <= resp.status_code <= 599:
-                logger.warning('server error, sleep a while')
-                time.sleep(2**i)
-                continue
-            break
-        return resp
+    def is_trading_symbol(self, symbol):
+        return bool(re.match(r'^t[A-Z]+$', symbol))
+
+    def is_funding_symbol(self, symbol):
+        return bool(re.match(r'^f[A-Z]+$', symbol))
 
     def is_symbol(self, symbol):
-        return bool(re.match(r'^[ft][A-Z]+$', symbol))
+        return self.is_trading_symbol(symbol) or self.is_funding_symbol(symbol)
 
     def public_req(self, path, params=None):
         url = self.BASE_URL + path
@@ -212,11 +275,52 @@ class PublicApi(object):
             raise BitfinexClientError('%s %s' % (resp.status_code, resp.text))
         return resp.json()
 
-    def trades(self, symbol):
-        trades = self.public_req('v2/trades/%s/hist' % symbol)
-        for i, trade in enumerate(trades):
-            trades[i] = Trade(trade)
-        return trades
+    def tickers(self, *symbols):
+        assert all(map(self.is_symbol, symbols))
+        tickers = self.public_req('v2/tickers?symbols=%s' % ','.join(symbols))
+        for i, ticker in enumerate(tickers):
+            if self.is_trading_symbol(symbols[i]):
+                tickers[i] = TradingTicker(ticker)
+            else:
+                tickers[i] = FundingTicker(ticker)
+        return tickers
+
+    def ticker(self, symbol):
+        assert self.is_symbol(symbol)
+        ticker = self.public_req('v2/ticker/%s' % symbol)
+        # Prepend symbol to make it compatible with tickers()
+        ticker = [symbol] + ticker
+        if self.is_trading_symbol(symbol):
+            ticker = TradingTicker(ticker)
+        else:
+            ticker = FundingTicker(ticker)
+        return ticker
+
+    def trades(self, symbol, limit=None, start=None, end=None,
+               new_to_old=True):
+        params = {}
+        if limit:
+            params['limit'] = limit
+        if start:
+            params['start'] = start * 1000
+        if end:
+            params['end'] = end * 1000
+        if new_to_old:
+            params['sort'] = -1 if new_to_old else 1
+        trades = self.public_req('v2/trades/%s/hist' % symbol, params)
+        return list(map(Trade, trades))
+
+    def book(self, symbol, precision, limit=25):
+        assert self.is_symbol(symbol)
+        assert precision in ['P0', 'P1', 'P2', 'P3', 'R0']
+        assert limit in [25, 100]
+        params = dict(len=limit)
+        book = self.public_req('v2/book/%s/%s' % (symbol, precision), params)
+        if self.is_trading_symbol(symbol):
+            book = list(map(TradingBook, book))
+        else:
+            book = list(map(FundingBook, book))
+        return book
 
     def candles(self,
                 time_frame,
@@ -236,9 +340,9 @@ class PublicApi(object):
         if limit:
             params['limit'] = limit
         if start:
-            params['start'] = start
+            params['start'] = start * 1000
         if end:
-            params['end'] = end
+            params['end'] = end * 1000
         if sort:
             params['sort'] = sort
 
@@ -247,8 +351,7 @@ class PublicApi(object):
         if section == 'last':
             candles = Candle(candles)
         else:
-            for i, candle in enumerate(candles):
-                candles[i] = Candle(candle)
+            candles = list(map(Candle, candles))
         return candles
 
 
@@ -282,7 +385,22 @@ class AuthedReadonlyApi(PublicApi):
             headers = self._headers(path, nonce, rawBody)
             resp = requests.post(url, rawBody, headers=headers, verify=True)
             if allow_retry:
-                if 500 <= resp.status_code <= 599:
+                if resp.status_code == 500:
+                    print(resp.status_code, resp.text)
+                    result = resp.json()
+                    if result[0] == 'error' and result[1] in [
+                            11000,  # ERR_READY
+                            20060,  # maintenance
+                    ]:
+                        logger.warning('server error, sleep a while')
+                        time.sleep(2**i)
+                        continue
+                    if result[0] == 'error' and result[1] == 11010:
+                        logger.warning('hit rate limit, sleep 20 seconds')
+                        time.sleep(20)
+                        continue
+                elif 501 <= resp.status_code <= 599:
+                    print(resp.status_code, resp.text)
                     logger.warning('server error, sleep a while')
                     time.sleep(2**i)
                     continue
@@ -296,84 +414,108 @@ class AuthedReadonlyApi(PublicApi):
     def wallets(self):
         """Get account wallets"""
         wallets = self.auth_req('v2/auth/r/wallets', allow_retry=True)
-        for i, wallet in enumerate(wallets):
-            wallets[i] = Wallet(wallet)
-        return wallets
+        return list(map(Wallet, wallets))
 
     def orders(self, symbol=''):
         """Get active orders"""
         assert symbol == '' or self.is_symbol(symbol)
         return self.auth_req('v2/auth/r/orders/%s' % symbol, allow_retry=True)
 
-    def orders_history(self, symbol=''):
+    def orders_history(self, symbol=None, start=None, end=None, limit=None):
         """Get orders history"""
-        assert symbol == '' or self.is_symbol(symbol)
+        assert symbol is None or self.is_symbol(symbol)
+        params = {}
+        if start:
+            params['start'] = start * 1000
+        if end:
+            params['end'] = end * 1000
+        if limit:
+            params['limit'] = limit
         if symbol:
             result = self.auth_req(
-                'v2/auth/r/orders/%s/hist' % symbol, allow_retry=True)
+                'v2/auth/r/orders/%s/hist' % symbol, params, allow_retry=True)
         else:
-            result = self.auth_req('v2/auth/r/orders/hist', allow_retry=True)
+            result = self.auth_req(
+                'v2/auth/r/orders/hist', params, allow_retry=True)
         return result
 
     def funding_offers(self, symbol=''):
-        assert symbol == '' or self.is_symbol(symbol)
+        assert symbol == '' or self.is_funding_symbol(symbol)
         offers = self.auth_req(
             'v2/auth/r/funding/offers/%s' % symbol, allow_retry=True)
-        for i, offer in enumerate(offers):
-            offers[i] = FundingOffer(offer)
-        return offers
+        return list(map(FundingOffer, offers))
 
-    def funding_offers_history(self, symbol=None):
+    def funding_offers_history(self,
+                               symbol=None,
+                               start=None,
+                               end=None,
+                               limit=None):
+        assert symbol == '' or self.is_funding_symbol(symbol)
+        params = {}
+        if start:
+            params['start'] = start * 1000
+        if end:
+            params['end'] = end * 1000
+        if limit:
+            params['limit'] = limit
         if symbol:
             assert self.is_symbol(symbol)
             offers = self.auth_req(
-                'v2/auth/r/funding/offers/%s/hist' % symbol, allow_retry=True)
+                'v2/auth/r/funding/offers/%s/hist' % symbol,
+                params,
+                allow_retry=True)
         else:
             offers = self.auth_req(
-                'v2/auth/r/funding/offers/hist', allow_retry=True)
-        for i, offer in enumerate(offers):
-            offers[i] = FundingOffer(offer)
-        return offers
+                'v2/auth/r/funding/offers/hist', params, allow_retry=True)
+        return list(map(FundingOffer, offers))
 
     def funding_credits(self, symbol):
         # pylint: disable=W0622
+        assert self.is_funding_symbol(symbol)
         credits = self.auth_req(
             'v2/auth/r/funding/credits/%s' % symbol, allow_retry=True)
-        for i, credit in enumerate(credits):
-            credits[i] = Credit(credit)
-        return credits
+        return list(map(Credit, credits))
 
     def funding_credits_history(self, symbol, start=None, end=None,
                                 limit=None):
         # pylint: disable=W0622
-        params = dict()
+        assert self.is_funding_symbol(symbol)
+        assert limit is None or limit <= 25  # ERR_PARAMS if limit > 25
+        params = {}
         if start:
-            params['start'] = start
+            params['start'] = start * 1000
         if end:
-            params['end'] = end
+            params['end'] = end * 1000
         if limit:
             params['limit'] = limit
         credits = self.auth_req(
             'v2/auth/r/funding/credits/%s/hist' % symbol,
             params,
             allow_retry=True)
-        for i, credit in enumerate(credits):
-            credits[i] = Credit(credit)
-        return credits
+        return list(map(Credit, credits))
 
-    def funding_trades(self, symbol=None):
+    def funding_trades(self, symbol=None, start=None, end=None, limit=None):
         """
         One "offer" may generate several "trades".
         """
+        assert symbol is None or self.is_funding_symbol(symbol)
+        assert limit is None or limit <= 250  # ERR_PARAMS if limit > 250
+        params = {}
+        if start:
+            params['start'] = start * 1000
+        if end:
+            params['end'] = end * 1000
+        if limit:
+            params['limit'] = limit
         if symbol:
             trades = self.auth_req(
-                'v2/auth/r/funding/trades/%s/hist' % symbol, allow_retry=True)
+                'v2/auth/r/funding/trades/%s/hist' % symbol,
+                params,
+                allow_retry=True)
         else:
             trades = self.auth_req(
-                'v2/auth/r/funding/trades/hist', allow_retry=True)
-        for i, trade in enumerate(trades):
-            trades[i] = FundingTrade(trade)
-        return trades
+                'v2/auth/r/funding/trades/hist', params, allow_retry=True)
+        return list(map(FundingTrade, trades))
 
     def funding_info(self, symbol):
         info = self.auth_req(
@@ -408,9 +550,13 @@ def example():
         print()
 
     print('=' * 10, 'public', '=' * 10)
-    output('trades', bfx.trades('fUSD'))
+    output('tickers', bfx.tickers('tETHUSD', 'fUSD'))
+    output('ticker', bfx.ticker('tBTCUSD'))
     output('candle(last)', bfx.candles('1m', 'tETHUSD', 'last'))
     output('candle(hist)', bfx.candles('1m', 'tETHUSD', 'hist', limit=3))
+    output('trades', bfx.trades('fUSD'))
+    output('book (tBTCUSD)', bfx.book('tBTCUSD', 'P0', limit=25)[:3])
+    output('book (fUSD)', bfx.book('fUSD', 'P0', limit=25)[:3])
 
     print('=' * 10, 'authed', '=' * 10)
     output('wallets', bfx.wallets())
@@ -419,7 +565,7 @@ def example():
     output('offers credit', bfx.funding_credits('fUSD'))
     output('offers credit history', bfx.funding_credits_history('fUSD'))
     output('funding info', bfx.funding_info('fUSD'))
-    output('funding trades', bfx.funding_trades())
+    output('funding trades', bfx.funding_trades(limit=5))
 
 
 if __name__ == '__main__':
