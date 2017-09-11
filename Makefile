@@ -1,6 +1,6 @@
 # Makefile for some convenient operations.
 
-LINT_FILES = $(shell find alec -name '*.py' -type f | sort)
+PY_FILES = $(shell find alec -name '*.py' -type f | sort)
 UNITTESTS = $(shell find alec -name '*_unittest.py' | sort)
 
 LINT_OPTIONS = --rcfile=bin/pylintrc \
@@ -16,5 +16,8 @@ test:
 	 done
 
 lint:
-	@pep8 $(LINT_FILES)
-	@pylint $(LINT_OPTIONS) $(LINT_FILES)
+	@pep8 $(PY_FILES)
+	@pylint $(LINT_OPTIONS) $(PY_FILES)
+
+format:
+	@yapf -d $(PY_FILES)

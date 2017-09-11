@@ -11,7 +11,6 @@ from ws4py.client import WebSocketBaseClient
 
 from alec import config
 
-
 slack = Slacker(config.SLACK_TOKEN) if config.SLACK_ENABLE else None
 
 
@@ -33,11 +32,12 @@ class TickerMonitor(WebSocketBaseClient):
 
     def opened(self):
         for symbol in self._symbols:
-            self.send(json.dumps({
-                'event': 'subscribe',
-                'channel': 'ticker',
-                'symbol': symbol
-            }))
+            self.send(
+                json.dumps({
+                    'event': 'subscribe',
+                    'channel': 'ticker',
+                    'symbol': symbol
+                }))
             time.sleep(0.5)
 
     def received_message(self, message):
@@ -68,9 +68,9 @@ class TickerMonitor(WebSocketBaseClient):
                     (arrow, symbol[1:], LAST_PRICE, change_pct))
 
         self._prices[symbol].append(new_avg_price)
-        self._prices[symbol] = self._prices[symbol][- self._window_size:]
-        self._moving_average[symbol] = (sum(self._prices[symbol]) /
-                                        len(self._prices[symbol]))
+        self._prices[symbol] = self._prices[symbol][-self._window_size:]
+        self._moving_average[symbol] = (
+            sum(self._prices[symbol]) / len(self._prices[symbol]))
         print('MA[%s]: %.2f' % (symbol, self._moving_average[symbol]))
 
 

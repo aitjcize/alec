@@ -54,3 +54,4 @@ wcwidth==0.1.7
 wrapt==1.10.11
 ws4py==0.4.2
 git+https://github.com/henrytw/btfxwss.git
+yapf==0.17.0

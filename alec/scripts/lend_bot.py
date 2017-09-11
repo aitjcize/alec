@@ -72,8 +72,8 @@ class LendBot(object):
         :param rate: Rate in percentage per day
         """
         self._v1_client.new_offer(currency, amount, rate, period)
-        log('Create an new %s offer with amount: %f, rate: %f, period: %d' % (
-            currency, amount, rate, period))
+        log('Create an new %s offer with amount: %f, rate: %f, period: %d' %
+            (currency, amount, rate, period))
 
     def cancel_offer(self, offer_id):
         """Cancel an offer"""
@@ -95,6 +95,7 @@ def main():
     log('LendBot started')
     monitor = LendBot('USD')
     monitor.run()
+
 
 if __name__ == '__main__':
     main()
