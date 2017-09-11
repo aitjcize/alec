@@ -7,7 +7,6 @@ import csv
 import datetime
 import sys
 
-
 USD = 'USD'
 POSITION_TEXT = 'Position closed'
 FEE_TEXT = 'Trading fees'
@@ -24,9 +23,7 @@ class ProfitCalc(object):
     def print_amount(self, amount, desc=None):
         if desc:
             desc = ' (%s)' % desc
-        print('%s%.2f%s' % (' ' if amount >= 0.0 else '',
-                            amount,
-                            desc or ''))
+        print('%s%.2f%s' % (' ' if amount >= 0.0 else '', amount, desc or ''))
 
     def process(self):
         dates = []
@@ -49,8 +46,8 @@ class ProfitCalc(object):
                 amount = float(row[3])
                 datestr = row[5]
 
-                dates.append(datetime.datetime.strptime(datestr,
-                                                        DATETIME_FORMAT))
+                dates.append(
+                    datetime.datetime.strptime(datestr, DATETIME_FORMAT))
                 if POSITION_TEXT in desc:
                     positions.append(amount)
                 elif FEE_TEXT in desc:
@@ -70,8 +67,8 @@ class ProfitCalc(object):
         self.print_amount(total_fees, 'trading fees')
         self.print_amount(total_fundcosts, 'funding costs')
         self.print_amount(total_funding, 'funding earnings')
-        print('=%.2f' % (total_margin + total_fees + total_fundcosts +
-                         total_funding))
+        print('=%.2f' %
+              (total_margin + total_fees + total_fundcosts + total_funding))
 
 
 if __name__ == '__main__':

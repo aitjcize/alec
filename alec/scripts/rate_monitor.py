@@ -32,8 +32,8 @@ class RateMonitor(object):
         self._funding = {}
         self._credits = {}
         self._offers = {}
-        self._wss = BtfxWss(key=config.BFX_API_KEY,
-                            secret=config.BFX_API_SECRET)
+        self._wss = BtfxWss(
+            key=config.BFX_API_KEY, secret=config.BFX_API_SECRET)
         self._wss.start()
 
     def reset(self):
@@ -212,9 +212,9 @@ class RateMonitor(object):
 
     def process_public_trade(self, symbol, data):
         trade = bitfinex_v2_rest.Trade(data)
-        log("%s: Timestamp: %s, Rate: %f, Period: %d, Amount: %f" % (
-            symbol, time.strftime("%H:%M:%S", time.localtime(trade.time)),
-            trade.rate * 100, trade.period, abs(trade.amount)))
+        log("%s: Timestamp: %s, Rate: %f, Period: %d, Amount: %f" %
+            (symbol, time.strftime("%H:%M:%S", time.localtime(trade.time)),
+             trade.rate * 100, trade.period, abs(trade.amount)))
 
         if trade.time > self._funding['latest_ts']:
             self._funding['latest_ts'] = trade.time
@@ -225,10 +225,10 @@ class RateMonitor(object):
             available = self._funding['total'] - self._funding['lent']
         else:
             return
-        if 'available' not in self._funding or (
-                available != self._funding['available']):
-            log('total: %f, lent: %f, available: %f' % (
-                self._funding['total'], self._funding['lent'], available))
+        if 'available' not in self._funding or (available !=
+                                                self._funding['available']):
+            log('total: %f, lent: %f, available: %f' %
+                (self._funding['total'], self._funding['lent'], available))
             self._funding['available'] = available
 
         # Re-write the strategy by yourself
@@ -247,8 +247,8 @@ class RateMonitor(object):
             log(e.value)
             raise
 
-        log('Create an new %s offer with amount: %f, rate: %f, ' % (
-            currency, amount, rate) + 'period: %d' % period)
+        log('Create an new %s offer with amount: %f, rate: %f, ' %
+            (currency, amount, rate) + 'period: %d' % period)
         self._offers[result['offer_id']] = amount
         self._funding['lent'] += amount
         return result['offer_id']
@@ -261,6 +261,7 @@ class RateMonitor(object):
             log(e.value)
             raise
         log('Cancel an offer with id: %d' % offer_id)
+
 
 if __name__ == '__main__':
     log('=' * 30)
