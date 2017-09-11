@@ -62,8 +62,10 @@ class TickerMonitor(WebSocketBaseClient):
             new_price_delta = new_avg_price - self._prices[symbol][-1]
             ratio = new_price_delta / self._moving_average[symbol]
             if abs(ratio) > self._threshold:
-                log('Pair %s price changed, price = %.3f, ratio = %.2f%%' %
-                    (symbol, LAST_PRICE, ratio * 100.0))
+                arrow = ':arrow_up:' if ratio > 0 else ':arrow_down:'
+                change_pct = '{0:+.02f}%'.format(ratio * 100.0)
+                log('%s %s @ %.3f, %s' %
+                    (arrow, symbol[1:], LAST_PRICE, change_pct))
 
         self._prices[symbol].append(new_avg_price)
         self._prices[symbol] = self._prices[symbol][- self._window_size:]
@@ -73,7 +75,6 @@ class TickerMonitor(WebSocketBaseClient):
 
 
 if __name__ == '__main__':
-    log('TickerMonitor started')
     while True:
         ws = TickerMonitor(config.PRICE_MONITOR_PAIRS,
                            config.PRICE_MONITOR_THRESHOLD,
