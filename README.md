@@ -29,3 +29,4 @@ Useful Commands
 1. `profit_calc`: calculate profit according ledger csv file.
 2. `price_monitor`: monitors trading price.
 3. `rate_monitor`: monitor margin funding price.
+4. `funding_stats`: report funding performance and statistics.

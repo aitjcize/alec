@@ -132,7 +132,14 @@ class AuthedReadonlyApi(PublicApi):
 
         for i in range(MAX_RETRY):
             headers = self._headers(path, params or {})
-            resp = requests.post(url, headers=headers, verify=True)
+            try:
+                resp = requests.post(url, headers=headers, verify=True)
+            except requests.exceptions.ConnectionError:
+                if allow_retry:
+                    logger.warning('connection error, sleep a while')
+                    time.sleep(2**i)
+                    continue
+                raise
             if allow_retry:
                 if 500 <= resp.status_code <= 599:
                     logger.warning('server error, sleep a while')
@@ -290,7 +297,7 @@ class FullApi(AuthedReadonlyApi):
             'period': period,
             'direction': direction,
         }
-        return self.auth_req('v1/offer/new', body)
+        return self._normalize(self.auth_req('v1/offer/new', body))
 
     def cancel_offer(self, offer_id):
         """Cancel an offer"""
