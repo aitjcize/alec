@@ -88,6 +88,30 @@ class PublicApi(object):
             result[k] = v
         return result
 
+    def ticker(self, symbol):
+        return self._normalize(self.public_req('v1/ticker/%s' % symbol))
+
+    def stats(self, symbol):
+        return self._normalize(self.public_req('v1/stats/%s' % symbol))
+
+    def funding_book(self, currency, limit_bids=None, limit_asks=None):
+        params = {}
+        if limit_bids is not None:
+            params['limit_bids'] = limit_bids
+        if limit_asks is not None:
+            params['limit_asks'] = limit_asks
+        return self._normalize(
+            self.public_req('v1/lendbook/%s' % currency, params))
+
+    def trades(self, symbol, timestamp=None, limit=None):
+        params = {}
+        if timestamp:
+            params['timestamp'] = timestamp
+        if limit:
+            params['limit_trades'] = limit
+        return self._normalize(
+            self.public_req('v1/trades/%s' % symbol, params))
+
     def lends(self, currency, timestamp=None, limit=None):
         """Get a list of the most recent funding data for the given currency:
         total amount provided and Flash Return Rate (in % by 365 days) over
@@ -327,6 +351,10 @@ def example():
         print()
 
     print('=' * 10, 'public', '=' * 10)
+    output('trades', bfx.trades('ETHUSD', limit=10))
+    output('ticker', bfx.ticker('ETHUSD'))
+    output('stats', bfx.stats('ETHUSD'))
+    output('funding_book', bfx.funding_book('USD', limit_bids=0)['asks'])
     output('lends', bfx.lends('USD', limit=5))
     output('symbols', bfx.symbols())
 
