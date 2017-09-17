@@ -4,21 +4,26 @@
 from __future__ import print_function
 
 import argparse
+import datetime
 import logging
 import time
 
 from slacker import Slacker
 
 from alec import config
+from alec.api import BitfinexClientError
 from alec.api import bitfinex_v1_rest
 from alec.api import bitfinex_v2_rest
 
 slack = Slacker(config.SLACK_TOKEN) if config.SLACK_ENABLE else None
 logger = logging.getLogger(__name__)
 
+def timestamp_to_string(t):
+    return str(datetime.datetime.utcfromtimestamp(int(t)))
+
 
 def log(text):
-    print(time.strftime("%H:%M:%S", time.localtime()) + ' ' + text)
+    print(timestamp_to_string(time.time()) + '\t' + text)
     if slack:
         slack.chat.post_message(config.SLACK_CHANNEL, text)
 
@@ -37,10 +42,17 @@ class LendBot(object):
 
     def run(self):
         while True:
-            self.get_account_info()
-            self.get_public_trades()
-            sleep_time = self.lend_strategy()
-            time.sleep(sleep_time)
+            try:
+                self.get_account_info()
+                self.get_public_trades()
+                sleep_time = self.lend_strategy()
+                time.sleep(sleep_time)
+            except BitfinexClientError as e:
+                log(str(e))
+                raise
+            except Exception as e:
+                log(str(e))
+                raise
 
     def get_account_info(self):
         for wallet in self._v1_client.balances():
@@ -75,13 +87,18 @@ class LendBot(object):
         log('Create an new %s offer with amount: %f, rate: %f, period: %d' %
             (currency, amount, rate, period))
 
-    def cancel_offer(self, offer_id):
+    def cancel_offer(self, offer):
         """Cancel an offer"""
-        self._v1_client.cancel_offer(offer_id)
-        log('Cancel an offer with id: %d' % offer_id)
+        self._v1_client.cancel_offer(offer['id'])
+        log('Cancel an offer with amount: %f, rate: %f, period: %d' % (
+            offer['remaining_amount'], offer['rate'] / 365, offer['period']))
 
 
 def main():
+    """ This bot may raise exception. Suggest to run the bot by the command:
+    while [ 1=1 ]; do ./lend_bot.py ; sleep 3; done
+    """
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--debug', action='store_true')
     opts = parser.parse_args()
