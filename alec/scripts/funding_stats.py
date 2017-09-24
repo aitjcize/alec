@@ -3,6 +3,7 @@
 from __future__ import print_function
 import argparse
 import datetime
+import decimal
 import re
 import logging
 import time
@@ -45,14 +46,15 @@ def xirr(flow, period=365 * secs_per_day):
     flow = sorted(flow)
     if flow[0][0] == flow[-1][0]:
         return 0
-    flow = [(f[0], float(f[1])) for f in flow]
+    flow = [list(map(decimal.Decimal, f)) for f in flow]
 
     def pv(rate):
+        rate = decimal.Decimal(rate)
         begin = flow[0][0]
-        total = 0.0
+        total = 0
         for f in flow:
-            d = float(f[0] - begin) / period
-            total += f[1] / pow(rate, 1.0 * d)
+            d = (f[0] - begin) / period
+            total += f[1] / pow(rate, d)
         return total
 
     l = 1e-10
