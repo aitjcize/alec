@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import print_function
 import argparse
+import collections
 import datetime
 import decimal
 import re
@@ -30,6 +31,10 @@ def get_funding_balance(v1, currency):
 
 def timestamp_to_string(t):
     return str(datetime.datetime.utcfromtimestamp(float(t)))
+
+
+def utcdate_to_timestamp(d):
+    return (d - datetime.date(1970, 1, 1)).total_seconds()
 
 
 def xirr(flow, period=365 * secs_per_day):
@@ -99,7 +104,7 @@ def main():
     last_payment = None
     # In reverse order
     # TODO(kcwu): support paging
-    payment_by_day = {}
+    payment_by_day = collections.defaultdict(float)
     weighted_amount_by_day = {}
     for h in v1.history(opts.currency, wallet=wallet_name.lower()):
         curr_time = h['timestamp']
@@ -116,12 +121,27 @@ def main():
                       h['description']):
             amount = h['amount']
             description = 'funding payment'
-            payment_by_day[int(curr_time / secs_per_day) - 1] = float(amount)
+            payment_by_day[int(curr_time / secs_per_day) - 1] += float(amount)
 
             # Ignore cash flow after last payment.
             if last_payment is None:
                 last_payment = curr_time
                 flow = [[curr_time, current_amount]]
+
+        elif re.match(
+                r'Margin Funding Payment \(adj \d+-\d+-\d+\) on wallet Deposit',
+                h['description']):
+            # special adjustment on 2017-09
+            m = re.search(r'adj (\d+)-(\d+)-(\d+)', h['description'])
+            assert m
+            amount = h['amount']
+            description = 'funding payment (%s)' % m.group(0)
+            adj_date = datetime.date(
+                int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            adj_time = utcdate_to_timestamp(adj_date)
+            day = int(adj_time / secs_per_day)
+            payment_by_day[day] += float(amount)
+
         elif re.match(r'Deposit.* on wallet Deposit', h['description']):
             amount = h['amount']
             flow.append([curr_time, -amount])
