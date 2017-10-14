@@ -74,6 +74,7 @@ class PublicApi(object):
                     'available',
                     'balance',
                     'fee',
+                    'rate',
             ]:
                 v = decimal.Decimal(v)
 
@@ -82,7 +83,7 @@ class PublicApi(object):
                 v = float(v)
 
             # misc number
-            elif k in ['rate', 'period']:
+            elif k in ['period']:
                 v = float(v)
 
             result[k] = v
