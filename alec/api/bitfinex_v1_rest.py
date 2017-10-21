@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRY = 5
 
+REQUEST_TIMEOUT = 30
+
 
 def rate_limit(period):
     last_call_time = {}
@@ -48,7 +50,8 @@ class PublicApi(object):
         logger.debug('public_req %s %s', path, params)
 
         for i in range(MAX_RETRY):
-            resp = requests.get(url, params, verify=True)
+            resp = requests.get(url, params, verify=True,
+                                timeout=REQUEST_TIMEOUT)
             if 500 <= resp.status_code <= 599:
                 logger.warning('server error, sleep a while')
                 time.sleep(2**i)
@@ -158,7 +161,8 @@ class AuthedReadonlyApi(PublicApi):
         for i in range(MAX_RETRY):
             headers = self._headers(path, params or {})
             try:
-                resp = requests.post(url, headers=headers, verify=True)
+                resp = requests.post(url, headers=headers, verify=True,
+                                     timeout=REQUEST_TIMEOUT)
             except requests.exceptions.ConnectionError:
                 if allow_retry:
                     logger.warning('connection error, sleep a while')

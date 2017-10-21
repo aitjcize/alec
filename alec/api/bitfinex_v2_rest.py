@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRY = 5
 
+REQUEST_TIMEOUT = 30
+
 
 class Timestamp(float):
     def __new__(cls, value):
@@ -263,7 +265,8 @@ class PublicApi(object):
         logger.debug('public_req %s %s', path, params)
 
         for i in range(MAX_RETRY):
-            resp = requests.get(url, params, verify=True)
+            resp = requests.get(url, params, verify=True,
+                                timeout=REQUEST_TIMEOUT)
             if 500 <= resp.status_code <= 599:
                 logger.warning('server error, sleep a while')
                 time.sleep(2**i)
@@ -383,7 +386,8 @@ class AuthedReadonlyApi(PublicApi):
         for i in range(MAX_RETRY):
             nonce = self._nonce()
             headers = self._headers(path, nonce, rawBody)
-            resp = requests.post(url, rawBody, headers=headers, verify=True)
+            resp = requests.post(url, rawBody, headers=headers, verify=True,
+                                 timeout=REQUEST_TIMEOUT)
             if allow_retry:
                 if resp.status_code == 500:
                     print(resp.status_code, resp.text)
