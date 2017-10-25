@@ -11,6 +11,7 @@ USD = 'USD'
 POSITION_TEXT = 'Position closed'
 FEE_TEXT = 'Trading fees'
 FUNDCOST_TEXT = 'funding cost'
+FUNDFEE_TEXT = 'Unused Margin Funding Fee'
 FUNDPAY_TEXT = 'Funding Payment'
 
 DATETIME_FORMAT = '%Y-%m-%d %H:%M:%S'
@@ -52,7 +53,7 @@ class ProfitCalc(object):
                     positions.append(amount)
                 elif FEE_TEXT in desc:
                     fees.append(amount)
-                elif FUNDCOST_TEXT in desc:
+                elif FUNDCOST_TEXT in desc or FUNDFEE_TEXT in desc:
                     fundcosts.append(amount)
                 elif FUNDPAY_TEXT in desc:
                     fundpays.append(amount)
