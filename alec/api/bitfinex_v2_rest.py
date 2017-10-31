@@ -265,9 +265,13 @@ class PublicApi(object):
         logger.debug('public_req %s %s', path, params)
 
         for i in range(MAX_RETRY):
-            resp = requests.get(url, params, verify=True,
-                                timeout=REQUEST_TIMEOUT)
-            if 500 <= resp.status_code <= 599:
+            timeout = False
+            try:
+                resp = requests.get(url, params, verify=True,
+                                    timeout=REQUEST_TIMEOUT)
+            except requests.exceptions.Timeout:
+                timeout = True
+            if timeout or 500 <= resp.status_code <= 599:
                 logger.warning('server error, sleep a while')
                 time.sleep(2**i)
                 continue
@@ -386,8 +390,16 @@ class AuthedReadonlyApi(PublicApi):
         for i in range(MAX_RETRY):
             nonce = self._nonce()
             headers = self._headers(path, nonce, rawBody)
-            resp = requests.post(url, rawBody, headers=headers, verify=True,
-                                 timeout=REQUEST_TIMEOUT)
+            try:
+                resp = requests.post(url, rawBody, headers=headers,
+                                     verify=True, timeout=REQUEST_TIMEOUT)
+            except (requests.exceptions.ConnectionError,
+                    requests.exceptions.Timeout):
+                if allow_retry:
+                    logger.warning('connection error, sleep a while')
+                    time.sleep(2**i)
+                    continue
+                raise
             if allow_retry:
                 if resp.status_code == 500:
                     print(resp.status_code, resp.text)
