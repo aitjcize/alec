@@ -1,11 +1,15 @@
+asn1crypto==0.23.0
 astroid==1.5.3
 backports.functools-lru-cache==1.4
 backports.shutil-get-terminal-size==1.0.0
 bitfinex==0.2.6
 bt==0.2.5
+btfxwss==1.1.1
 certifi==2017.7.27.1
+cffi==1.11.0
 chardet==3.0.4
 configparser==3.5.0
+cryptography==2.0.3
 cycler==0.10.0
 decorator==4.1.2
 enum34==1.1.6
@@ -15,6 +19,7 @@ functools32==3.2.3.post2
 future==0.16.0
 httpretty==0.8.14
 idna==2.6
+ipaddress==1.0.18
 ipython==5.4.1
 ipython-genutils==0.2.0
 isort==4.2.15
@@ -30,8 +35,10 @@ pexpect==4.2.1
 pickleshare==0.7.4
 prompt-toolkit==1.0.15
 ptyprocess==0.5.2
+pycparser==2.18
 Pygments==2.2.0
 pylint==1.7.2
+pyOpenSSL==17.3.0
 pyparsing==2.2.0
 PyPrind==2.11.1
 python-dateutil==2.6.1
@@ -51,6 +58,7 @@ tabulate==0.7.7
 traitlets==4.3.2
 urllib3==1.22
 wcwidth==0.1.7
+websocket-client==0.44.0
 wrapt==1.10.11
 ws4py==0.4.2
 git+https://github.com/henrytw/btfxwss.git
