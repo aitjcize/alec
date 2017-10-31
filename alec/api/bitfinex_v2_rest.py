@@ -160,6 +160,52 @@ class Candle(BitfinexApiResponse):
     ]
 
 
+class Order(BitfinexApiResponse):
+    FIELDS = [
+        'id',
+        'gid',
+        'cid',
+        'symbol',
+        'mts_create',
+        'mts_update',
+        'amount',
+        'amount_orig',
+        'type',
+        'type_prev',
+        '',
+        '',
+        'flags',
+        'status',
+        '',
+        '',
+        'price',
+        'price_avg',
+        'price_trailing',
+        'price_aux_limit',
+        '',
+        '',
+        '',
+        'notify',
+        'hidden',
+        'placed_id',
+    ]
+
+
+class Position(BitfinexApiResponse):
+    FIELDS = [
+        'symbol',
+        'status',
+        'amount',
+        'base_price',
+        'margin_funding',
+        'margin_funding_type',
+        'pl',
+        'pl_prec',
+        'price_liq',
+        'leverage',
+    ]
+
+
 class Wallet(BitfinexApiResponse):
     FIELDS = [
         'wallet_type',
