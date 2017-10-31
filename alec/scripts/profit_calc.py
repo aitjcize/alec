@@ -11,6 +11,7 @@ USD = 'USD'
 POSITION_TEXT = 'Position closed'
 FEE_TEXT = 'Trading fees'
 FUNDCOST_TEXT = 'funding cost'
+FUNDFEE_TEXT = 'Unused Margin Funding Fee'
 FUNDPAY_TEXT = 'Funding Payment'
 
 DATETIME_FORMAT = '%Y-%m-%d %H:%M:%S'
@@ -20,10 +21,10 @@ class ProfitCalc(object):
     def __init__(self, csvfiles):
         self._csvfiles = csvfiles
 
-    def print_amount(self, amount, desc=None):
+    def print_amount(self, amount, desc=None, prefix=' '):
         if desc:
             desc = ' (%s)' % desc
-        print('%s%.2f%s' % (' ' if amount >= 0.0 else '', amount, desc or ''))
+        print('%s%10.2f%s' % (prefix, amount, desc or ''))
 
     def process(self):
         dates = []
@@ -52,7 +53,7 @@ class ProfitCalc(object):
                     positions.append(amount)
                 elif FEE_TEXT in desc:
                     fees.append(amount)
-                elif FUNDCOST_TEXT in desc:
+                elif FUNDCOST_TEXT in desc or FUNDFEE_TEXT in desc:
                     fundcosts.append(amount)
                 elif FUNDPAY_TEXT in desc:
                     fundpays.append(amount)
@@ -67,8 +68,10 @@ class ProfitCalc(object):
         self.print_amount(total_fees, 'trading fees')
         self.print_amount(total_fundcosts, 'funding costs')
         self.print_amount(total_funding, 'funding earnings')
-        print('=%.2f' %
-              (total_margin + total_fees + total_fundcosts + total_funding))
+        print('-' * 30)
+        self.print_amount(
+                total_margin + total_fees + total_fundcosts + total_funding,
+                prefix='=')
 
 
 if __name__ == '__main__':
