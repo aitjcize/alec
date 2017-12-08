@@ -83,6 +83,8 @@ class PublicApi(object):
                     'balance',
                     'fee',
                     'rate',
+                    'avg_execution_price',
+                    'last_price',
             ]:
                 v = decimal.Decimal(v)
 
@@ -93,6 +95,11 @@ class PublicApi(object):
             # misc number
             elif k in ['period']:
                 v = float(v)
+
+            # In order history or status, price is None for market order.
+            elif k in ['price']:
+                if v is not None:
+                    v = decimal.Decimal(v)
 
             result[k] = v
         return result
@@ -222,6 +229,18 @@ class AuthedReadonlyApi(PublicApi):
     def orders(self):
         return self._normalize(self.auth_req('v1/orders', allow_retry=True))
 
+    def order_status(self, id):
+        body = {
+            'order_id': id,
+        }
+        return self._normalize(self.auth_req('v1/order/status', body, allow_retry=True))
+
+    def cancel_order(self, id):
+        body = {
+            'order_id': id,
+        }
+        return self._normalize(self.auth_req('v1/order/cancel', body, allow_retry=True))
+
     @rate_limit(60)
     def orders_history(self):
         return self._normalize(
@@ -339,6 +358,17 @@ class FullApi(AuthedReadonlyApi):
         body = {'offer_id': offer_id}
         return self.auth_req('v1/offer/cancel', body)
 
+    def new_limit_order(self, symbol, amount, price, side):
+        body = {
+            'symbol': symbol,
+            'amount': str(amount),
+            'price': str(price),
+            'exchange': 'bitfinex',
+            'side': side,
+            'type': 'exchange limit',
+        }
+        return self._normalize(self.auth_req('v1/order/new', body, allow_retry=True))
+
 
 def example():
     parser = argparse.ArgumentParser()
@@ -380,6 +410,19 @@ def example():
     output('balances', bfx.balances())
     output('balance history', bfx.history('USD', wallet='funding'))
     output('movements', bfx.movements('BTC'))
+
+    bfx_full_client = FullApi()
+
+    # Test new order, check order stutus, and cancel it.
+    # Make sure you really want to do this before enabling them.
+    # new_order_status = bfx_full_client.new_limit_order(symbol='ETCUSD', amount=0.8, price='0.01', side='buy')
+    # output('new order', new_order_status)
+
+    # check order status.
+    # output('one order', bfx.order_status(id=new_order_status['id']))
+
+    # cancel order
+    # output('cancel order', bfx_full_client.cancel_order(new_order_status['id']))
 
     # exchange
     output('orders', bfx.orders())
