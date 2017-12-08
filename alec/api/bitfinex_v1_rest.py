@@ -52,7 +52,7 @@ class PublicApi(object):
         for i in range(MAX_RETRY):
             timeout = False
             try:
-                resp = requests.get(url, params, verify=True,
+                resp = requests.get(url, params=params, verify=True,
                                     timeout=REQUEST_TIMEOUT)
             except requests.exceptions.Timeout:
                 timeout = True
