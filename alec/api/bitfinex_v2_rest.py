@@ -294,6 +294,19 @@ class FundingTrade(BitfinexApiResponse):
     ]
 
 
+class Notifications(BitfinexApiResponse):
+    FIELDS = [
+        'mts',
+        'type',
+        '',
+        'message_id',
+        'notify_info',
+        'code',
+        'status',
+        'text',
+    ]
+
+
 class PublicApi(object):
     BASE_URL = 'https://api.bitfinex.com/'
 
