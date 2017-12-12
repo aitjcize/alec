@@ -392,7 +392,10 @@ class TradeBot(object):
         logger.debug('available coin: %s, amount: %s', wallet['available'],
                      amount)
 
-        if wallet['available'] >= amount:
+        # If there is still coin in the exchange wallet, create this order.
+        # Note that the balance quried from api might be out-dated.
+        # Leave some margin for this kind of discrepancy.
+        if wallet['available'] >= amount * 2:
             status = self._create_new_order(
                 symbol=symbol, price=sell_price, amount=amount, side='sell')
             sell_order_id = status['id']
@@ -410,8 +413,10 @@ class TradeBot(object):
         buy_price = mid_price * buy_target_ratio
 
         # If there is still fiat in the exchange wallet, create this order.
+        # Note that the balance quried from api might be out-dated.
+        # Leave some margin for this kind of discrepancy.
         wallet = self._get_wallet_info(FIAT, balances)
-        if wallet['available'] >= buy_price * amount:
+        if wallet['available'] >= buy_price * amount * 2:
             status = self._create_new_order(
                 symbol=symbol, price=buy_price, amount=amount, side='buy')
             buy_order_id = status['id']
