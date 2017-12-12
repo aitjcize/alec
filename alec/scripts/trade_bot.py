@@ -313,6 +313,13 @@ class TradeBot(object):
             if self._order_was_cancelled(order_status):
                 self._watched_orders.pop(id)
 
+                # The paired order of this cancelled order should
+                # not be paired with this cancelled order anymore.
+                if id in self._paired_orders:
+                    another_id = self._paired_orders[id]
+                    self._paired_orders.pop(id)
+                    self._paired_orders.pop(another_id)
+
             # Executed. Record and react on it.
             elif self._order_was_executed(order_status):
                 # Log total value after an order is executed.
