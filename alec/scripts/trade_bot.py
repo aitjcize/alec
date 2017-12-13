@@ -383,6 +383,8 @@ class TradeBot(object):
         for balances.
 
         """
+        # TODO(cychiang) use balances to determine placing order or not.
+
         logger.debug('Create paired orders for %s, %s from %s',
                      symbol, amount, mid_price)
         target_config = self._targets[symbol]
@@ -393,48 +395,29 @@ class TradeBot(object):
         sell_target_ratio = decimal.Decimal(1.0) + target_config['step']
         sell_price = mid_price * sell_target_ratio
 
-        # If there is still available target in wallet, create this order.
-        wallet = self._get_wallet_info(currency=target_config['currency'],
-                                       balances=balances)
-        logger.debug('available coin: %s, amount: %s', wallet['available'],
-                     amount)
-
-        # If there is still coin in the exchange wallet, create this order.
-        # Note that the balance quried from api might be out-dated.
-        # Leave some margin for this kind of discrepancy.
-        if wallet['available'] >= amount * 2:
-            status = self._create_new_order(
+        status = self._create_new_order(
                 symbol=symbol, price=sell_price, amount=amount, side='sell')
+        if status:
             sell_order_id = status['id']
             # Add the new order to watchlist.
             self._watched_orders[sell_order_id] = status
-
-            # Modify the wallet.
-            wallet['available'] -= amount
         else:
-            log('Not enough %s to create a sell order' %
-                target_config['currency'], need_coin=True)
+            log('Not enough %s to create a sell order @ %s' %
+                (target_config['currency'], sell_price), need_coin=True)
 
         # Set a buy order with less price and the same amount.
         buy_target_ratio = decimal.Decimal(1.0) - target_config['step']
         buy_price = mid_price * buy_target_ratio
 
-        # If there is still fiat in the exchange wallet, create this order.
-        # Note that the balance quried from api might be out-dated.
-        # Leave some margin for this kind of discrepancy.
-        wallet = self._get_wallet_info(FIAT, balances)
-        if wallet['available'] >= buy_price * amount * 2:
-            status = self._create_new_order(
+        status = self._create_new_order(
                 symbol=symbol, price=buy_price, amount=amount, side='buy')
+        if status:
             buy_order_id = status['id']
             # Add the new order to watchlist.
             self._watched_orders[buy_order_id] = status
-
-            # Modify the wallet.
-            wallet['available'] -= buy_price * amount
         else:
-            log('Not enough %s to create a buy order' % FIAT,
-                need_fiat=True)
+            log('Not enough %s to create a buy order @ %s' %
+                (FIAT, buy_price), need_fiat=True)
 
         # Records this pair so one execution can cancel the other one in
         # the future.
@@ -443,9 +426,24 @@ class TradeBot(object):
             self._paired_orders[buy_order_id] = sell_order_id
 
     def _create_new_order(self, symbol, price, amount, side):
-        """Creates a new order and returns the order status."""
-        status = self._v1_client.new_limit_order(
-            symbol=symbol, amount=amount, price=price, side=side)
+        """Creates a new order and returns the order status.
+
+        Returns: Order status on success. None on failure because of
+                 not enough coin/fiat in exchange wallet.
+
+        """
+        try:
+            status = self._v1_client.new_limit_order(
+                symbol=symbol, amount=amount, price=price, side=side)
+        except BitfinexClientError as e:
+            # Not enough fiat or coin in exchange wallet.
+            if 'Invalid order: not enough' in str(e):
+                log(str(e), exception=True)
+                logger.warning('Invalid order: %s', str(e))
+                return None
+            else:
+                raise
+
         logger.info('New order: %s: %s %s: %s @ %s', status['id'],
                     side, symbol, amount, price)
         log('Create %s: %s %s: %s @ %s' % (
