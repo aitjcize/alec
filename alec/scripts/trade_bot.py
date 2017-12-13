@@ -7,6 +7,7 @@ import argparse
 import datetime
 import decimal
 import logging
+import os
 import pprint
 import sqlite3
 import time
@@ -581,7 +582,6 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--bootstrap', help='setup database', action='store_true')
     parser.add_argument('--clean_up_orders',
                          help='cancel all orders with matched amount. '
                               'Default to True.',
@@ -603,13 +603,14 @@ def main():
     logging.getLogger("requests").setLevel(logging.WARNING)
 
     db = None
-    # Connect database.
+    # Connect to a database.
     if config.TRADE_BOT_DB:
-        db = database_utils.DatabaseManager(config.TRADE_BOT_DB)
-        # Create table.
-        if opts.bootstrap:
+        # Create a new db and create table.
+        if not os.path.exists(config.TRADE_BOT_DB):
+            db = database_utils.DatabaseManager(config.TRADE_BOT_DB)
             bootstrap_db(db)
-            return
+        else:
+            db = database_utils.DatabaseManager(config.TRADE_BOT_DB)
 
     log('config: %s' % str(config.TRADE_BOT_TARGETS))
     monitor = TradeBot(config.TRADE_BOT_TARGETS, db)
