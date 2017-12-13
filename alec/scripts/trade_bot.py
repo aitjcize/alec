@@ -23,9 +23,10 @@ EMOJI_SELL = ':heart:'
 EMOJI_BUY = ':blue_heart:'
 EMOJI_NOT_ENOUGH_COIN = ':rocket:'
 EMOJI_NOT_ENOUGH_FIAT = ':anchor:'
+EMOJI_WARNING = ':fearful:'
 
 FIAT = 'usd'
-MAX_CANCEL_ORDER_RETRIES = 5
+MAX_CANCEL_ORDER_RETRIES = 10
 MAX_ORDER_STATUS_RETRIES = 30
 
 RATE_LIMIT_TIME = 120
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 def log(text, exception=False, side=None, need_coin=False, need_fiat=False,
-        admin=False):
+        admin=False, warning=False):
     """Log to stdout and slack if enabled.
 
     Args:
@@ -45,6 +46,7 @@ def log(text, exception=False, side=None, need_coin=False, need_fiat=False,
       need_coin: Add emoji when more coin is needed.
       need_fiat: Add emoji when more fiat is needed.
       admin: Notify slack admin.
+      warning: Show warning sign.
 
     """
     print(str(datetime.datetime.now()) + '\t' + text)
@@ -59,6 +61,8 @@ def log(text, exception=False, side=None, need_coin=False, need_fiat=False,
             text = EMOJI_NOT_ENOUGH_COIN + ' ' + text
         if need_fiat:
             text = EMOJI_NOT_ENOUGH_FIAT + ' ' + text
+        if warning:
+            text = EMOJI_WARNING + ' ' + text
         if admin:
             text = '@' + config.SLACK_ADMIN + ' ' + text
 
@@ -241,8 +245,21 @@ class TradeBot(object):
                 order_status['is_cancelled'] == False)
 
     def _cancel_order(self, id):
-        """Cancels one order by order id."""
+        """Cancels one order by order id.
+
+        Tries to cancel an order. However, there are various reason where
+        cancel_order can fail. Retry for some cases.
+        Store order id to database anyway.
+
+        Returns: True on success, False if order could not be cancelled.
+
+        """
         log('Cancel order %s' % id)
+
+        # No matter the cancel order request succeed or not, store it
+        # to db.
+        self._save_should_be_cancelled_order(id)
+
         # Retry some times to cancel an order.
         for i in xrange(MAX_CANCEL_ORDER_RETRIES):
             try:
@@ -254,13 +271,14 @@ class TradeBot(object):
                     continue
                 raise
             except Exception as e:
-                logger.exception('Can not cancel order %s', id)
+                logger.exception('Can not cancel order %s for some other reason',
+                                 id)
                 log(str(e), exception=True)
                 raise
 
             return
 
-        log('Still can not cancel order for %s' % id, exception=True)
+        log('Still can not cancel order for %s' % id, warning=True)
 
     def _get_order_status(self, id):
         """Gets status of one order by order id.
@@ -339,6 +357,14 @@ class TradeBot(object):
                     self._cancel_order(another_id)
                     self._paired_orders.pop(id)
                     self._paired_orders.pop(another_id)
+
+                # If an order that should be cancelled was somehow left alive,
+                # and got executed, do not create new order for it.
+                if self._is_should_be_cancelled_order(id):
+                    logger.warning('Execute one fail-to-cancel order: %s' % id)
+                    log('Execute one fail-to-cancel order: %s' % id,
+                        warning=True)
+                    continue
 
                 self._action_to_executed_order(order_status, balances=balances)
 
@@ -438,7 +464,7 @@ class TradeBot(object):
         except BitfinexClientError as e:
             # Not enough fiat or coin in exchange wallet.
             if 'Invalid order: not enough' in str(e):
-                log(str(e), exception=True)
+                log(str(e), warning=True)
                 logger.warning('Invalid order: %s', str(e))
                 return None
             else:
@@ -527,10 +553,23 @@ class TradeBot(object):
     def check_order_status(self, id):
         print(self._get_order_status(id=id))
 
+    def _save_should_be_cancelled_order(self, id):
+        """Saves an order that should be cancelled into db."""
+        self._db.execute("INSERT INTO cancelled_orders VALUES (?)", (id,))
+
+    def _is_should_be_cancelled_order(self, id):
+        """Checks if an order should be cancelled."""
+        c = self._db.execute("SELECT 1 FROM cancelled_orders WHERE id = (?)", (id,))
+        ret = c.fetchone()
+        logger.debug('%s is an order that should be cancelled', id)
+
+        return (ret is not None)
+
 
 def bootstrap_db(db):
     """Creates a database to store executed orders."""
     db.execute("""CREATE TABLE executed_orders (timestamp, symbol, side, amount, price)""")
+    db.execute("""CREATE TABLE cancelled_orders (id)""")
 
 
 def main():
