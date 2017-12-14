@@ -76,6 +76,7 @@ class TradeBotError(Exception):
 
 class TradeBot(object):
     NORMAL_INTERVAL = 30
+    POST_RESULT_INTERVAL = 300
 
     def __init__(self, targets, db):
         """Inits a trade bot.
@@ -101,6 +102,7 @@ class TradeBot(object):
         self._db = db
         # Record the order to be cancelled if one order is executed.
         self._paired_orders = {}
+        self._last_time_post_result = 0
 
     def _normalize_target(self):
         """Normalize some configs."""
@@ -166,8 +168,16 @@ class TradeBot(object):
             try:
                 logger.info('=' * 20)
                 log('=' * 20)
+
+                # Post result in a rough interval.
+                if (time.time() - self._last_time_post_result >
+                    self.POST_RESULT_INTERVAL):
+                    self._post_result_to_slack()
+                    self._last_time_post_result = time.time()
+
                 sleep_time = self._trade_strategy()
                 time.sleep(sleep_time)
+
             except BitfinexClientError as e:
                 log('Bitfinex: ' + str(e), exception=True)
                 if 'ERR_RATE_LIMIT' in str(e):
@@ -565,6 +575,41 @@ class TradeBot(object):
         logger.debug('%s is an order that should be cancelled', id)
 
         return (ret is not None)
+
+    def _post_result_to_slack(self):
+        """Posts today result to slack."""
+        c = self._db.execute("SELECT * FROM today")
+        today = c.fetchall()
+
+        if not today:
+          log('No result for today yet')
+          return
+
+        log('=-=' * 40)
+
+        lines = []
+        for date, side, count, value in today:
+            line = '%s: %s, %s' % (side, count, str(value))
+            lines.append(line)
+
+        log('\n'.join(lines))
+
+        log('*.*' * 40)
+
+        c = self._db.execute("SELECT * FROM today_coin")
+        today_coins = c.fetchall()
+        lines = []
+        for date, side, symbol, count, value in today_coins:
+            line = '%s: %s: %s, %s' % (
+                    '{:>10s}'.format(symbol[0:3]),
+                    '{:>10s}'.format(side),
+                    '{:>10d}'.format(count),
+                    '{:>20s}'.format(str(value)))
+            lines.append('-.-' * 40)
+            lines.append(line)
+
+        log('\n'.join(lines))
+        log('=-=' * 40)
 
 
 def bootstrap_db(db):
