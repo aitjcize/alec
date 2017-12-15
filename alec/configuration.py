@@ -25,6 +25,6 @@ class Config(object):
     RATE_MONITOR_SYMBOLS = (
         ast.literal_eval(os.getenv('RATE_MONITOR_SYMBOLS', '[]')) or ['fUSD'])
 
-    TRADE_BOT_TARGETS =  (
-        ast.literal_eval(os.getenv('TRADE_BOT_TARGETS', '{}')))
-    TRADE_BOT_DB = os.getenv('TRADE_BOT_DB')
+    TRADE_JBOT_TARGETS =  (
+        ast.literal_eval(os.getenv('TRADE_JBOT_TARGETS', '{}')))
+    TRADE_JBOT_DB = os.getenv('TRADE_JBOT_DB')

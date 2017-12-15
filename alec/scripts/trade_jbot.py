@@ -620,7 +620,7 @@ def bootstrap_db(db):
 
 def main():
     """ This bot may raise exception. Suggest to run the bot by the command:
-    while true; do trade_bot ; sleep 3; done
+    while true; do trade_jbot ; sleep 3; done
 
     When there is exception, the bot will post message to slack.
     """
@@ -649,16 +649,16 @@ def main():
 
     db = None
     # Connect to a database.
-    if config.TRADE_BOT_DB:
+    if config.TRADE_JBOT_DB:
         # Create a new db and create table.
-        if not os.path.exists(config.TRADE_BOT_DB):
-            db = database_utils.DatabaseManager(config.TRADE_BOT_DB)
+        if not os.path.exists(config.TRADE_JBOT_DB):
+            db = database_utils.DatabaseManager(config.TRADE_JBOT_DB)
             bootstrap_db(db)
         else:
-            db = database_utils.DatabaseManager(config.TRADE_BOT_DB)
+            db = database_utils.DatabaseManager(config.TRADE_JBOT_DB)
 
-    log('config: %s' % str(config.TRADE_BOT_TARGETS))
-    monitor = TradeBot(config.TRADE_BOT_TARGETS, db)
+    log('config: %s' % str(config.TRADE_JBOT_TARGETS))
+    monitor = TradeBot(config.TRADE_JBOT_TARGETS, db)
 
     if opts.order_status:
         monitor.check_order_status(opts.order_status)
