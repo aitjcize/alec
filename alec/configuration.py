@@ -6,6 +6,7 @@ import os
 
 class Config(object):
     SLACK_ENABLE = os.getenv('SLACK_ENABLE').lower() == 'true'
+    SLACK_ADMIN = os.getenv('SLACK_ADMIN')
     SLACK_TOKEN = os.getenv('SLACK_TOKEN')
     SLACK_CHANNEL = os.getenv('SLACK_CHANNEL')
 
@@ -23,3 +24,7 @@ class Config(object):
         ])
     RATE_MONITOR_SYMBOLS = (
         ast.literal_eval(os.getenv('RATE_MONITOR_SYMBOLS', '[]')) or ['fUSD'])
+
+    TRADE_JBOT_TARGETS =  (
+        ast.literal_eval(os.getenv('TRADE_JBOT_TARGETS', '{}')))
+    TRADE_JBOT_DB = os.getenv('TRADE_JBOT_DB')
