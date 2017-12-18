@@ -3,6 +3,8 @@
 from __future__ import print_function
 import argparse
 import base64
+import calendar
+import datetime
 import decimal
 import hashlib
 import hmac
@@ -23,7 +25,15 @@ REQUEST_TIMEOUT = 30
 
 
 def rate_limit(period):
+    """Rate limit decorator
+
+    Args:
+        period: in seconds
+    """
     last_call_time = {}
+
+    if period < 6:
+        period = 6
 
     def decorator(func):
         def wrapper(*args, **kargs):
@@ -31,16 +41,34 @@ def rate_limit(period):
             delta = now - last_call_time.get(func, 0)
             last_call_time[func] = now
             if delta < period:
-                logger.warning(
+                logger.debug(
                     '%s was called too frequently. delay %s seconds',
                     func.__name__, period - delta)
                 time.sleep(period - delta)
-            return func(*args, **kargs)
+            result = func(*args, **kargs)
+            last_call_time[func] = time.time()
+            return result
 
         return wrapper
 
     return decorator
 
+
+def totimestamp(v):
+    """Convert to timestamp
+
+    Args:
+        v: could be unix timestamp (str or number), datetime.date, or
+           datetime.datetime
+
+    Returns:
+        unix timestamp (str)
+    """
+    # assume v is in UTC
+    assert v
+    if isinstance(v, (datetime.date, datetime.datetime)):
+        v = (v - v.fromtimestamp(0)).total_seconds()
+    return str(v)
 
 class PublicApi(object):
     BASE_URL = 'https://api.bitfinex.com/'
@@ -104,12 +132,15 @@ class PublicApi(object):
             result[k] = v
         return result
 
+    @rate_limit(60. / 30)
     def ticker(self, symbol):
         return self._normalize(self.public_req('v1/ticker/%s' % symbol))
 
+    @rate_limit(60. / 10)
     def stats(self, symbol):
         return self._normalize(self.public_req('v1/stats/%s' % symbol))
 
+    @rate_limit(60. / 45)
     def funding_book(self, currency, limit_bids=None, limit_asks=None):
         params = {}
         if limit_bids is not None:
@@ -119,6 +150,7 @@ class PublicApi(object):
         return self._normalize(
             self.public_req('v1/lendbook/%s' % currency, params))
 
+    @rate_limit(60. / 45)
     def trades(self, symbol, timestamp=None, limit=None):
         params = {}
         if timestamp:
@@ -128,6 +160,7 @@ class PublicApi(object):
         return self._normalize(
             self.public_req('v1/trades/%s' % symbol, params))
 
+    @rate_limit(60. / 60)
     def lends(self, currency, timestamp=None, limit=None):
         """Get a list of the most recent funding data for the given currency:
         total amount provided and Flash Return Rate (in % by 365 days) over
@@ -141,6 +174,7 @@ class PublicApi(object):
         return self._normalize(
             self.public_req('v1/lends/%s' % currency, params))
 
+    @rate_limit(60. / 5)
     def symbols(self):
         return self.public_req('v1/symbols')
 
@@ -223,6 +257,7 @@ class AuthedReadonlyApi(PublicApi):
         return self._normalize(
             self.auth_req('v1/margin_infos', allow_retry=True))
 
+    @rate_limit(60. / 20)
     def balances(self):
         return self._normalize(self.auth_req('v1/balances', allow_retry=True))
 
@@ -241,7 +276,7 @@ class AuthedReadonlyApi(PublicApi):
         }
         return self._normalize(self.auth_req('v1/order/cancel', body, allow_retry=True))
 
-    @rate_limit(60)
+    @rate_limit(60. / 1)
     def orders_history(self):
         return self._normalize(
             self.auth_req('v1/orders/hist', allow_retry=True))
@@ -249,21 +284,27 @@ class AuthedReadonlyApi(PublicApi):
     def positions(self):
         return self._normalize(self.auth_req('v1/positions', allow_retry=True))
 
+    @rate_limit(60. / 20)
     def history(self,
                 currency,
                 since=None,
                 until=None,
                 limit=None,
                 wallet=None):
-        """View all of your balance ledger entries."""
+        """View all of your balance ledger entries.
+
+        Args:
+            since: could be timestamp, date, or datetime. Inclusive.
+            until: could be timestamp, date, or datetime. Inclusive.
+        """
         assert self.is_currency(currency)
         assert wallet is None or self.is_wallet(wallet)
 
         params = dict(currency=currency)
         if since:
-            params['since'] = since
+            params['since'] = totimestamp(since)
         if until:
-            params['until'] = until
+            params['until'] = totimestamp(until)
         if wallet:
             params['wallet'] = wallet
         if limit:
@@ -277,16 +318,21 @@ class AuthedReadonlyApi(PublicApi):
                   since=None,
                   until=None,
                   limit=None):
-        """View your past deposits/withdrawals."""
+        """View your past deposits/withdrawals.
+
+        Args:
+            since: could be timestamp, date, or datetime.
+            until: could be timestamp, date, or datetime.
+        """
         assert self.is_currency(currency)
 
         params = dict(currency=currency)
         if method:
             params['method'] = method
         if since:
-            params['since'] = since
+            params['since'] = totimestamp(since)
         if until:
-            params['until'] = until
+            params['until'] = totimestamp(until)
         if limit:
             params['limit'] = limit
         return self._normalize(
@@ -302,7 +348,7 @@ class AuthedReadonlyApi(PublicApi):
         params = dict(
             symbol=symbol, timestamp=timestamp, reverse=1 if reverse else 0)
         if until:
-            params['until'] = until
+            params['until'] = totimestamp(until)
         if limit_trades:
             params['limit_trades'] = limit_trades
         return self._normalize(self.auth_req('v1/mytrades', allow_retry=True))
@@ -327,6 +373,7 @@ class AuthedReadonlyApi(PublicApi):
         return self._normalize(
             self.auth_req('v1/offers/hist', params, allow_retry=True))
 
+    @rate_limit(60. / 45)
     def mytrades_funding(self, symbol):
         """View your past trades."""
         params = dict(symbol=symbol)
@@ -385,8 +432,8 @@ def example():
     def output(title, result):
         print('-' * 5, title, '-' * 5)
         if isinstance(result, list):
-            for x in result:
-                print(x)
+            for i, x in enumerate(result):
+                print(i, x)
         else:
             print(result)
         print()
