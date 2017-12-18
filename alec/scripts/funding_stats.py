@@ -147,6 +147,12 @@ def main():
             flow.append([curr_time, -amount])
             description = '-> %s' % wallet_name
 
+        elif re.match(r'Adjustment Margin Funding Payment on wallet Deposit', h['description']):
+            # special adj_time on 2017-12
+            amount = h['amount']
+            description = 'payment adjustment'
+            payment_by_day[int(curr_time / secs_per_day) - 1] += float(amount)
+
         else:
             assert 0, 'unknown history: %s' % h
 
