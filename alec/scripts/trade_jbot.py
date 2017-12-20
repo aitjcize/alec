@@ -80,7 +80,7 @@ class TradeBotError(Exception):
 
 class TradeBot(object):
     NORMAL_INTERVAL = 30
-    POST_RESULT_INTERVAL = 300
+    POST_RESULT_INTERVAL = 60 * 30
     WAIT_MARKET_ORDER_SECS = 5
 
     def __init__(self, targets, db):
@@ -107,7 +107,7 @@ class TradeBot(object):
         self._db = db
         # Record the order to be cancelled if one order is executed.
         self._paired_orders = {}
-        self._last_time_post_result = 0
+        self._last_time_post_result = time.time()
         # Watchlist for market orders.
         self._watched_market_orders = {}
 
@@ -126,11 +126,6 @@ class TradeBot(object):
         """Gets latest price of a symbol."""
         ticker = self._v1_client.ticker(symbol)
         return ticker['last_price']
-
-    def _log_total_value(self):
-        """Logs total value."""
-        total_value = self._get_account_info(print_log=False)
-        log('Total value: %s' % total_value)
 
     def _get_account_info(self, print_log=False):
         """Shows balances and value and get total value.
@@ -170,7 +165,6 @@ class TradeBot(object):
 
     def run(self):
         """Runs main strategy in a loop."""
-        self._get_account_info(print_log=True)
         while True:
             try:
                 logger.info('=' * 20)
@@ -358,9 +352,6 @@ class TradeBot(object):
 
             # Executed. Record and react on it.
             elif self._order_was_executed(order_status):
-                # Log total value after an order is executed.
-                self._log_total_value()
-
                 logger.info('Executed: %s', order_status)
                 # Store the executed order.
                 self._record_executed(order_status)
@@ -677,6 +668,12 @@ class TradeBot(object):
 
     def _post_result_to_slack(self):
         """Posts today result to slack."""
+        # Guard this call with some sleep time before and after it
+        # to avoid hitting API rate limit.
+        time.sleep(20)
+        self._get_account_info(print_log=True)
+        time.sleep(20)
+
         c = self._db.execute("SELECT * FROM today")
         today = c.fetchall()
 
