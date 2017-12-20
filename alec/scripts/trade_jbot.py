@@ -760,15 +760,16 @@ def main():
         monitor.check_order_status(opts.order_status)
         return
 
+    # Notify admin when trade bot starts.
+    # If there is something wrong and tradebot runs in a loop,
+    # admin will know.
+    log('Tradebot started', admin=True)
+
     # Possibly clean up orders first.
     if opts.clean_up_orders:
         log('Tradebot clean up orders', admin=True)
         monitor.clean_up_orders()
 
-    # Notify admin when trade bot starts.
-    # If there is something wrong and tradebot runs in a loop,
-    # admin will know.
-    log('Tradebot started', admin=True)
     monitor.run()
 
 
