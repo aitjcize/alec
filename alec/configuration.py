@@ -28,3 +28,6 @@ class Config(object):
     TRADE_JBOT_TARGETS =  (
         ast.literal_eval(os.getenv('TRADE_JBOT_TARGETS', '{}')))
     TRADE_JBOT_DB = os.getenv('TRADE_JBOT_DB')
+
+    # Tradebot config
+    TRADE_HBOT_CONFIG = (ast.literal_eval(os.getenv('TRADE_HBOT_CONFIG', '{}')))
