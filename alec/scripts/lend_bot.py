@@ -6,8 +6,10 @@ from __future__ import print_function
 import argparse
 import datetime
 import logging
+import os
 import time
 
+import pytz
 from slacker import Slacker
 
 from alec import config
@@ -19,7 +21,9 @@ slack = Slacker(config.SLACK_TOKEN) if config.SLACK_ENABLE else None
 logger = logging.getLogger(__name__)
 
 def timestamp_to_string(t):
-    return str(datetime.datetime.utcfromtimestamp(int(t)))
+    tz = pytz.timezone('Asia/Taipei')
+    local_time = datetime.datetime.fromtimestamp(int(t), tz)
+    return str(local_time.strftime('%Y-%m-%d %H:%M:%S'))
 
 
 def log(text):
@@ -31,7 +35,7 @@ def log(text):
 class LendBot(object):
     NORMAL_INTERVAL = 60
 
-    def __init__(self, currency):
+    def __init__(self, currency, stop_file):
         self._v1_client = bitfinex_v1_rest.FullApi()
         self._v2_client = bitfinex_v2_rest.PublicApi()
         self._currency = currency
@@ -39,13 +43,14 @@ class LendBot(object):
         self._credits = []
         self._offers = []
         self._trades = []
+        self._lendbot_file = stop_file
 
     def run(self):
         while True:
             try:
                 self.get_account_info()
                 self.get_public_trades()
-                sleep_time = self.lend_strategy()
+                sleep_time = self.routine()
                 time.sleep(sleep_time)
             except BitfinexClientError as e:
                 log(str(e))
@@ -53,6 +58,23 @@ class LendBot(object):
             except Exception as e:
                 log(str(e))
                 raise
+
+    def routine(self):
+        if os.path.exists(self._lendbot_file):
+            return self.stop_lendbot()
+        else:
+            return self.lend_strategy()
+
+    def stop_lendbot(self):
+        for offer in self._offers:
+            if offer['currency'] != self._currency:
+                continue
+            self.cancel_offer(offer)
+
+        available = self._wallet['available']
+        if available > 0:
+            self.move_wallet(available)
+        return self.NORMAL_INTERVAL
 
     def get_account_info(self):
         for wallet in self._v1_client.balances():
@@ -93,6 +115,10 @@ class LendBot(object):
         log('Cancel an offer with amount: %f, rate: %f, period: %d' % (
             offer['remaining_amount'], offer['rate'] / 365, offer['period']))
 
+    def move_wallet(self, amount):
+        self._v1_client.transfer_wallet('USD', amount, 'deposit', 'exchange')
+        log('Transfer %f from funding to exchange' % amount)
+
 
 def main():
     """ This bot may raise exception. Suggest to run the bot by the command:
@@ -101,6 +127,7 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--stop_file', default=os.path.expanduser('~/.stop_lendbot'))
     opts = parser.parse_args()
 
     if opts.debug:
@@ -110,7 +137,7 @@ def main():
 
     print('=' * 30)
     log('LendBot started')
-    monitor = LendBot('USD')
+    monitor = LendBot('USD', opts.stop_file)
     monitor.run()
 
 

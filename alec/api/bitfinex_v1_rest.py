@@ -369,6 +369,21 @@ class FullApi(AuthedReadonlyApi):
         }
         return self._normalize(self.auth_req('v1/order/new', body, allow_retry=True))
 
+    def transfer_wallet(self, currency, amount, wallet_from, wallet_to):
+        """Transfer available balances between wallets.
+        :param currency: 'USD', 'BTC', or other crypto currencies
+        :param amount: Amount to transfer
+        :param wallet_from: 'trading', 'deposit', or 'exchange'
+        :param wallet_to: 'trading', 'deposit', or 'exchange'
+        """
+        body = {
+            'currency': currency,
+            'amount': str(amount),
+            'walletfrom': wallet_from,
+            'walletto': wallet_to,
+        }
+        return self.auth_req('v1/transfer', body)
+
 
 def example():
     parser = argparse.ArgumentParser()
