@@ -681,7 +681,7 @@ class TradeBot(object):
           log('No result for today yet')
           return
 
-        log('=-=' * 40)
+        log('=-=' * 10)
 
         lines = []
         for date, side, count, value in today:
@@ -690,7 +690,7 @@ class TradeBot(object):
 
         log('\n'.join(lines))
 
-        log('*.*' * 40)
+        log('*.*' * 10)
 
         c = self._db.execute("SELECT * FROM today_coin")
         today_coins = c.fetchall()
@@ -701,11 +701,11 @@ class TradeBot(object):
                     '{:>10s}'.format(side),
                     '{:>10d}'.format(count),
                     '{:>20s}'.format(str(value)))
-            lines.append('-.-' * 40)
+            lines.append('-.-' * 10)
             lines.append(line)
 
         log('\n'.join(lines))
-        log('=-=' * 40)
+        log('=-=' * 10)
 
 
 def bootstrap_db(db):
