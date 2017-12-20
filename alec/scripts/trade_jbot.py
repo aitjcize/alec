@@ -229,6 +229,11 @@ class TradeBot(object):
 
         return True
 
+    def _get_live_order_ids(self):
+        """Gets a list of live order ids."""
+        orders = self._v1_client.orders()
+        return [order['id'] for order in orders]
+
     def _check_new_watched_orders(self):
         """Finds any live order that should be put into the watchlist."""
         orders = self._v1_client.orders()
@@ -329,10 +334,17 @@ class TradeBot(object):
         """
         # This balances will be reused for this iteration.
         balances = self._get_balances()
+
+        # Check live orders in one API call to save rate limit.
+        live_orders = self._get_live_order_ids()
+
         # Put watched ids in a list because we will remove items in the
         # dict in for loop. Use list since keys() returns an iterator
         # in Python 3.
         for id in list(self._watched_orders.keys()):
+            if id in live_orders:
+                continue
+
             # Queries the status of this order.
             order_status = self._get_order_status(id=id)
             # Can not find this order. Give up this time.
