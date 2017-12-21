@@ -367,7 +367,9 @@ class FullApi(AuthedReadonlyApi):
             'side': side,
             'type': 'exchange limit',
         }
-        return self._normalize(self.auth_req('v1/order/new', body, allow_retry=True))
+        # Do not retry because when connection error happens, the order might
+        # already be created at server side.
+        return self._normalize(self.auth_req('v1/order/new', body), allow_retry=False)
 
     def transfer_wallet(self, currency, amount, wallet_from, wallet_to):
         """Transfer available balances between wallets.
