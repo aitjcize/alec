@@ -28,6 +28,7 @@ EMOJI_LIMIT = ':broken_heart:'
 EMOJI_STOP_LEND = ':no_entry:'
 EMOJI_START_LEND = ':arrows_counterclockwise:'
 EMOJI_MOVE_WALLET = ':moneybag:'
+EMOJI_ERROR = ':exclamation:'
 
 slack = Slacker(config.SLACK_TOKEN) if config.SLACK_ENABLE else None
 logger = logging.getLogger(__name__)
@@ -52,7 +53,6 @@ def log(text, emoji=None, write_to_file=True):
             slack.chat.post_message(config.SLACK_CHANNEL, message)
     except:
         print("Slack api erorr")
-        pass
 
 
 class TradeBot(object):
@@ -270,12 +270,10 @@ class TradeBot(object):
                 self._orders[pair][order.id] = order
             self.remove_unconfirm_order(pair, order.price, order.amount_orig)
         elif order.status.startswith('PARTIALLY'):
-            log('Partially filled an order, pair: %s, amount: %f/%f, price: %f, avg_price: %f' %
-                (pair, order.amount, order.amount_orig, order.price, order.price_avg),
-                EMOJI_PARTIAL)
             if order.id not in self._orders[pair]:
                 self._orders[pair][order.id] = order
             self.remove_unconfirm_order(pair, order.price, order.amount_orig)
+            self.handle_executed_order(order, config)
         elif order.status == 'CANCELED':
             log('Cancelled an order, pair: %s, amount: %f, price: %f' %
                 (pair, order.amount, order.price))
@@ -424,7 +422,7 @@ class TradeBot(object):
             emoji = EMOJI_BUY if order.amount_orig > 0 else EMOJI_SELL
         else:
             emoji = EMOJI_DISCONNECT
-        if not math.isclose(order.amount, 0, rel_tol=0.00001):
+        if not math.isclose(order.amount, 0, rel_tol=0.00001) and normal:
             log('Partially filled an order, pair: %s, amount: %f/%f, price: %f, avg_price: %f' %
                 (pair, order.amount, order.amount_orig, order.price, order.price_avg),
                 EMOJI_PARTIAL)
@@ -589,6 +587,8 @@ class TradeBot(object):
             for order_id, order in orders.items():
                 if order_id not in self._orders[symbol]:
                     has_executed_order = True
+                    log('Missing an order, pair: %s, amount: %f, price: %f' %
+                        (symbol, order.amount_orig, order.price), EMOJI_DISCONNECT)
                     self.handle_executed_order(order, config, False)
         if not has_executed_order:
             log('No executed orders during disconnection', EMOJI_DISCONNECT)
@@ -630,8 +630,11 @@ class TradeBot(object):
             open(self._lendbot_file, 'w').close()
 
     def move_wallet(self, amount):
-        self._v1_client.transfer_wallet('USD', amount, 'exchange', 'deposit')
-        log('Transfer %f from exchange to funding' % amount, EMOJI_MOVE_WALLET)
+        try:
+            self._v1_client.transfer_wallet('USD', amount, 'exchange', 'deposit')
+            log('Transfer %f from exchange to funding' % amount, EMOJI_MOVE_WALLET)
+        except BitfinexClientError:
+            log('Move wallet error', EMOJI_ERROR)
 
 
 def main():

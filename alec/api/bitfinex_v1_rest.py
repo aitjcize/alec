@@ -181,7 +181,7 @@ class AuthedReadonlyApi(PublicApi):
                     logger.warning('connection error, sleep a while')
                     time.sleep(2**i)
                     continue
-                raise
+                raise BitfinexClientError('Connection error')
             if allow_retry:
                 if 500 <= resp.status_code <= 599:
                     logger.warning('server error, sleep a while')
