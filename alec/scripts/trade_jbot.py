@@ -675,7 +675,8 @@ class TradeBot(object):
         """Checks if an order should be cancelled."""
         c = self._db.execute("SELECT 1 FROM cancelled_orders WHERE id = (?)", (id,))
         ret = c.fetchone()
-        logger.debug('%s is an order that should be cancelled', id)
+        if ret:
+            logger.debug('%s is an order that should be cancelled', id)
 
         return (ret is not None)
 
