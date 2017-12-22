@@ -20,6 +20,13 @@ from alec.api import BitfinexClientError
 from alec.api import bitfinex_v1_rest
 from alec.api import bitfinex_v2_rest
 
+LOG_ERROR = 0
+LOG_INFO = 1
+LOG_VERBOSE = 2
+LOG_DEBUG = 3
+
+LOG_LEVEL = LOG_INFO
+
 EMOJI_SELL = ':heart:'
 EMOJI_BUY = ':blue_heart:'
 EMOJI_PARTIAL = ':green_heart:'
@@ -40,7 +47,9 @@ def timestamp_to_string(t):
     return str(local_time.strftime('%Y-%m-%d %H:%M:%S'))
 
 
-def log(text, emoji=None, write_to_file=True):
+def log(level, text, emoji=None, write_to_file=True):
+    if level > LOG_LEVEL:
+        return
     timestamp = timestamp_to_string(time.time())
     with open('log', 'a') as f:
         f.write(timestamp + '\t' + text + '\n')
@@ -48,6 +57,8 @@ def log(text, emoji=None, write_to_file=True):
     try:
         if slack:
             message = text
+            if level == LOG_ERROR:
+                emoji = EMOJI_ERROR
             if emoji:
                 message = emoji + ' ' + text
             slack.chat.post_message(config.SLACK_CHANNEL, message)
@@ -62,7 +73,7 @@ class TradeBot(object):
     AMOUNT_DIGIT = 4
     LAST_MOVE_WALLET_COOLDOWN_SEC = 60
 
-    def __init__(self, bot_config, stop_file, init_pairs=[]):
+    def __init__(self, bot_config, stop_file, init_pairs=[], recover_pairs=[]):
         self.BUY_CURRENCY = bot_config['buy_currency']
         self.RETRY_ORDER_IN_ERROR = bot_config['retry_in_error']
         self.RETRY_ORDER_IN_TIMEOUT = bot_config['retry_in_timeout']
@@ -72,6 +83,8 @@ class TradeBot(object):
         else:
             self._lendbot_setting = {'enable': False}
         self._init_pairs = init_pairs
+        self._recover_pairs = recover_pairs
+        self._view_status_pairs = []
         self._orders = {}
         self._num_coins = {}
         self._last_price = {}
@@ -88,6 +101,7 @@ class TradeBot(object):
             self._orders[symbol] = {}
             self._last_price[symbol] = 0
             self._last_add_timestamp[symbol] = 0
+            self._view_status_pairs.append(symbol)
         self._wss = BtfxWss(
             key=config.BFX_API_KEY, secret=config.BFX_API_SECRET)
         self._wss.start()
@@ -105,7 +119,7 @@ class TradeBot(object):
             self._last_price[symbol] = 0
 
     def connect(self):
-        log("Server connected")
+        log(LOG_INFO, "Server connected")
         self._wss.authenticate()
         for pair in self._symbols:
             symbol = 't' + pair
@@ -232,9 +246,13 @@ class TradeBot(object):
         if isinstance(data, list):
             for transaction in data:
                 self.process_public_ticker(pair, transaction)
-        if pair in self._init_pairs and self._received_order_snapshot and (
-                self._received_wallet_snapshot):
-            self.create_init_orders(pair)
+        if self._received_order_snapshot and self._received_wallet_snapshot:
+            if pair in self._init_pairs:
+                self.create_init_orders(pair)
+            if pair in self._recover_pairs:
+                self.create_recover_orders(pair)
+            if pair in self._view_status_pairs:
+                self.view_status(pair)
 
     def received_notifications(self, message):
         data, ts = message
@@ -257,7 +275,7 @@ class TradeBot(object):
         elif config['type'] == 'usd':
             self.check_fixed_usd_remain_times(pair, wallet.balance, config)
         else:
-            log('Pair %s has error config type %s' % (pair, config['type']))
+            log(LOG_ERROR, 'Pair %s has error config type %s' % (pair, config['type']))
 
     def process_order(self, data):
         order = bitfinex_v2_rest.Order(data)
@@ -275,13 +293,13 @@ class TradeBot(object):
             self.remove_unconfirm_order(pair, order.price, order.amount_orig)
             self.handle_executed_order(order, config)
         elif order.status == 'CANCELED':
-            log('Cancelled an order, pair: %s, amount: %f, price: %f' %
+            log(LOG_VERBOSE, 'Cancelled an order, pair: %s, amount: %f, price: %f' %
                 (pair, order.amount, order.price))
             del self._orders[pair][order.id]
         elif order.status.startswith('EXECUTED'):
             self.handle_executed_order(order, config)
         else:
-            log('Error order status: %s' % order.status)
+            log(LOG_ERROR, 'Error order status: %s' % order.status)
 
     def process_public_ticker(self, pair, data):
         ticker = bitfinex_v2_rest.TradingTicker([pair] + data)
@@ -291,7 +309,7 @@ class TradeBot(object):
         notification = bitfinex_v2_rest.Notifications(data)
         if notification.type == 'on-req' and notification.status == 'ERROR':
             order = bitfinex_v2_rest.Order(notification.notify_info)
-            log('Error new %s order with amount: %f, price: %f: %s' %
+            log(LOG_ERROR, 'Error new %s order with amount: %f, price: %f: %s' %
                 (order.symbol, order.amount, order.price, notification.text))
             currency = order.symbol[1:4]
             pair = order.symbol[1:]
@@ -302,7 +320,7 @@ class TradeBot(object):
                 elif 'minimum size' in notification.text:
                     pass
                 else:
-                    log('Need to retry order')
+                    log(LOG_INFO, 'Need to retry order')
                     self.new_order(pair, order.price, order.amount)
         elif notification.type == 'on-req' and notification.status == 'SUCCESS':
             order = bitfinex_v2_rest.Order(notification.notify_info)
@@ -310,7 +328,7 @@ class TradeBot(object):
             self.remove_unconfirm_order(pair, order.price, order.amount)
         elif notification.type == 'on-req':
             order = bitfinex_v2_rest.Order(notification.notify_info)
-            log('Notify new %s order with amount: %f, price: %f: %s' %
+            log(LOG_ERROR, 'Unhandled notify new %s order with amount: %f, price: %f: %s' %
                 (order.symbol, order.amount, order.price, notification.text))
 
     def check_order(self, pair, price, amount):
@@ -334,7 +352,7 @@ class TradeBot(object):
         balance = float(self._num_coins[pair[:3]])
         if config['type'] == 'crypto':
             if balance >= config['amount'] * config['limit']:
-                log('Pair %s balance: %f reach limit' % (pair, balance),
+                log(LOG_INFO, 'Pair %s balance: %f reach limit' % (pair, balance),
                     EMOJI_LIMIT)
                 return True
         elif config['type'] == 'usd':
@@ -348,7 +366,7 @@ class TradeBot(object):
                 price *= config['percent']
                 times += 1
             if market_value >= config['amount'] * config['limit']:
-                log('Pair %s current market value: %f reach limit' % (
+                log(LOG_INFO, 'Pair %s current market value: %f reach limit' % (
                     pair, market_value), EMOJI_LIMIT)
                 return True
         return False
@@ -358,7 +376,7 @@ class TradeBot(object):
         retry_orders = []
         for order in self._unconfirm_orders:
             if (time.time() - order[3]) > self.ORDER_TIMEOUT:
-                log('Order %s with amount: %f, price: %f timeout. Need to retry' %
+                log(LOG_ERROR, 'Order %s with amount: %f, price: %f timeout. Need to retry' %
                     (order[0], order[2], order[1]))
                 temp_orders.remove(order)
                 retry_orders.append(order)
@@ -379,7 +397,7 @@ class TradeBot(object):
         remain_times = int((balance + Decimal(0.00001)) /
                 Decimal(config['amount'])) 
         if remain_times <= self.REMAIN_TIMES:
-            log('Pair %s is not enough: %f' % (pair, balance))
+            log(LOG_INFO, 'Pair %s is not enough: %f' % (pair, balance))
             allow_buy = time.time() - self._last_add_timestamp[pair] > (
                     self.LAST_BUY_COOLDOWN_SEC)
             if self.BUY_CURRENCY and allow_buy:
@@ -404,7 +422,7 @@ class TradeBot(object):
             else:
                 break
         if remain_times <= self.REMAIN_TIMES:
-            log('Pair %s is not enough: %f' % (pair, balance))
+            log(LOG_INFO, 'Pair %s is not enough: %f' % (pair, balance))
             allow_buy = time.time() - self._last_add_timestamp[pair] > (
                     self.LAST_BUY_COOLDOWN_SEC)
             if self.BUY_CURRENCY and allow_buy:
@@ -422,13 +440,15 @@ class TradeBot(object):
             emoji = EMOJI_BUY if order.amount_orig > 0 else EMOJI_SELL
         else:
             emoji = EMOJI_DISCONNECT
+        # if normal is False, it means the function is called for disconnection orders.
+        # We don't need to check amount since the amount is out of date.
         if not math.isclose(order.amount, 0, rel_tol=0.00001) and normal:
-            log('Partially filled an order, pair: %s, amount: %f/%f, price: %f, avg_price: %f' %
+            log(LOG_VERBOSE, 'Partially filled an order, pair: %s, amount: %f/%f, price: %f, avg_price: %f' %
                 (pair, order.amount, order.amount_orig, order.price, order.price_avg),
                 EMOJI_PARTIAL)
             return
         else:
-            log('Executed an order, pair: %s, amount: %f, price: %f, avg_price: %f' %
+            log(LOG_INFO, 'Executed an order, pair: %s, amount: %f, price: %f, avg_price: %f' %
                 (pair, order.amount_orig, order.price, order.price_avg), emoji)
         if order.id in self._orders[pair]:
             del self._orders[pair][order.id]
@@ -507,6 +527,17 @@ class TradeBot(object):
         if not self.check_order(pair, upper_price, -amount):
             self.new_order(pair, upper_price, -amount)
 
+    def create_fixed_crypto_recover_orders(self, pair, config, price):
+        lower_price = price / (config['percent'] ** (config['profit'] + 1))
+        if not self.check_order(pair, lower_price, config['amount']):
+            self.new_order(pair, lower_price, config['amount'])
+
+    def create_fixed_usd_recover_orders(self, pair, config, price):
+        lower_price = price / (config['percent'] ** (config['profit'] + 1))
+        amount = round(config['amount'] / lower_price, self.AMOUNT_DIGIT)
+        if not self.check_order(pair, lower_price, amount):
+            self.new_order(pair, lower_price, amount)
+
     def new_order(self, pair, price, amount):
         symbol = 't' + pair
         cid = int(round(time.time() * 1000))
@@ -529,7 +560,7 @@ class TradeBot(object):
                     'hidden': 0
                     }
         self._wss.new_order(**order)
-        log('Create a new %s order with amount: %f, price: %f' %
+        log(LOG_VERBOSE, 'Create a new %s order with amount: %f, price: %f' %
             (pair, amount, price))
 
     def cancel_order(self, order):
@@ -569,7 +600,7 @@ class TradeBot(object):
         elif config['type'] == 'usd':
             buy_currency = self.check_fixed_usd_remain_times(pair, num_coins, config)
         if buy_currency:
-            log('Wait for currency ready')
+            log(LOG_INFO, 'Wait for currency ready')
             return
 
         if config['type'] == 'crypto':
@@ -577,6 +608,39 @@ class TradeBot(object):
         elif config['type'] == 'usd':
             self.create_fixed_usd_init_orders(pair, config)
         self._init_pairs.remove(pair)
+
+    def create_recover_orders(self, pair):
+        lowest_price = 0
+        for order_id, order in self._orders[pair].items():
+            if order.amount_orig > 0:
+                return
+            if lowest_price == 0 or order.price < lowest_price:
+                lowest_price = order.price
+        config = self._symbols[pair]
+        if config['type'] == 'crypto':
+            self.create_fixed_crypto_recover_orders(pair, config, lowest_price)
+        elif config['type'] == 'usd':
+            self.create_fixed_usd_recover_orders(pair, config, lowest_price)
+        self._recover_pairs.remove(pair)
+
+    def view_status(self, pair):
+        lowest_price = 0
+        for order_id, order in self._orders[pair].items():
+            if order.amount_orig > 0:
+                return
+            if lowest_price == 0 or order.price < lowest_price:
+                lowest_price = order.price
+
+        config = self._symbols[pair]
+        current_price = self._last_price[pair]
+        miss_price = lowest_price / (config['percent'] ** (config['profit'] + 1))
+        miss_times = 1
+        while miss_price > current_price:
+            miss_times += 1
+            miss_price /= config['percent']
+        log(LOG_INFO, 'pair %s lowest sell price %f, current price %f, need to add %d orders' % (
+            pair, lowest_price, current_price, miss_times))
+        self._view_status_pairs.remove(pair)
 
     def check_orders_during_disconnect(self):
         has_executed_order = False
@@ -587,13 +651,13 @@ class TradeBot(object):
             for order_id, order in orders.items():
                 if order_id not in self._orders[symbol]:
                     has_executed_order = True
-                    log('Missing an order, pair: %s, amount: %f, price: %f' %
+                    log(LOG_INFO, 'Missing an order, pair: %s, amount: %f, price: %f' %
                         (symbol, order.amount_orig, order.price), EMOJI_DISCONNECT)
                     self.handle_executed_order(order, config, False)
         if not has_executed_order:
-            log('No executed orders during disconnection', EMOJI_DISCONNECT)
+            log(LOG_INFO, 'No executed orders during disconnection', EMOJI_DISCONNECT)
         else:
-            log('Fixed missing orders during disconnection', EMOJI_DISCONNECT)
+            log(LOG_INFO, 'Fixed missing orders during disconnection', EMOJI_DISCONNECT)
 
     def check_lendbot(self):
         if not self._lendbot_setting['enable']:
@@ -609,9 +673,9 @@ class TradeBot(object):
             if os.path.exists(self._lendbot_file):
                 os.unlink(self._lendbot_file)
             if self._lendbot_start != True:
-                log('Start lendbot', EMOJI_START_LEND)
+                log(LOG_INFO, 'Start lendbot', EMOJI_START_LEND)
                 self._lendbot_start = True
-            log('Exchange: %f, Funding: %f' % (
+            log(LOG_INFO, 'Exchange: %f, Funding: %f' % (
                 self._usd_wallet['exchange'].balance,
                 self._usd_wallet['funding'].balance))
             target_amount = (self._usd_wallet['exchange'].balance -
@@ -625,16 +689,60 @@ class TradeBot(object):
                 self._usd_wallet['funding'].balance *
                 Decimal(self._lendbot_setting['stop_threshold'])):
             if self._lendbot_start != False:
-                log('Stop lendbot', EMOJI_STOP_LEND)
+                log(LOG_INFO, 'Stop lendbot', EMOJI_STOP_LEND)
                 self._lendbot_start = False
             open(self._lendbot_file, 'w').close()
 
     def move_wallet(self, amount):
         try:
             self._v1_client.transfer_wallet('USD', amount, 'exchange', 'deposit')
-            log('Transfer %f from exchange to funding' % amount, EMOJI_MOVE_WALLET)
+            log(LOG_INFO, 'Transfer %f from exchange to funding' % amount, EMOJI_MOVE_WALLET)
         except BitfinexClientError:
-            log('Move wallet error', EMOJI_ERROR)
+            log(LOG_ERROR, 'Move wallet error', EMOJI_ERROR)
+
+
+def check_pairs_in_config(pairs_str):
+    symbols = config.TRADE_HBOT_CONFIG['symbols']
+    pairs = []
+    if pairs_str:
+        if pairs_str.upper() == 'ALL':
+            for symbol in symbols:
+                pairs.append(symbol)
+        else:
+            for symbol in pairs_str.split():
+                pair = symbol.upper() + 'USD'
+                if pair in symbols:
+                    pairs.append(pair)
+                else:
+                    print("Pair %s is not in symbols config" % pair)
+    return pairs
+
+
+def check_config():
+    if not config.TRADE_HBOT_CONFIG:
+        print('TRADE_HBOT_CONFIG is empty')
+        return False
+
+    if 'symbols' not in config.TRADE_HBOT_CONFIG:
+        print('TRADE_HBOT_CONFIG miss symbols')
+        return False
+
+    if not config.TRADE_HBOT_CONFIG['symbols']:
+        print('Symbols in TRADE_HBOT_CONFIG is empty')
+        return False
+
+    if 'control_lendbot' in config.TRADE_HBOT_CONFIG:
+        lendbot_setting = config.TRADE_HBOT_CONFIG['control_lendbot']
+        if ('target' not in lendbot_setting or
+            'start_threshold' not in lendbot_setting or
+            'stop_threshold' not in lendbot_setting):
+            print('Missing seeting in control_lendbot')
+            return False
+        if (lendbot_setting['start_threshold'] <= lendbot_setting['target'] or
+            lendbot_setting['stop_threshold'] >= lendbot_setting['target']):
+            print('Threshold should be start > target > stop')
+            return False
+    return True
 
 
 def main():
@@ -650,6 +758,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--init', help='Currencies which need initial orders')
+    parser.add_argument('--recover', help='Currencies which need recovery')
     parser.add_argument('--stop_file',
             default=os.path.expanduser('~/.stop_lendbot'))
     opts = parser.parse_args()
@@ -659,45 +768,21 @@ def main():
     else:
         logging.basicConfig()
 
-    if not config.TRADE_HBOT_CONFIG:
-        print('TRADE_HBOT_CONFIG is empty')
+    if opts.init and opts.recover:
+        print('Init and recover cannot be used at the same time')
         return
 
-    if 'symbols' not in config.TRADE_HBOT_CONFIG:
-        print('TRADE_HBOT_CONFIG miss symbols')
+    if not check_config():
         return
-
-    if not config.TRADE_HBOT_CONFIG['symbols']:
-        print('Symbols in TRADE_HBOT_CONFIG is empty')
-        return
-
-    if 'control_lendbot' in config.TRADE_HBOT_CONFIG:
-        lendbot_setting = config.TRADE_HBOT_CONFIG['control_lendbot']
-        if ('target' not in lendbot_setting or
-            'start_threshold' not in lendbot_setting or
-            'stop_threshold' not in lendbot_setting):
-            print('Missing seeting in control_lendbot')
-            return
-        if (lendbot_setting['start_threshold'] <= lendbot_setting['target'] or
-            lendbot_setting['stop_threshold'] >= lendbot_setting['target']):
-            print('Threshold should be start > target > stop')
-            return
 
     address = '0x84d6bc1b4ebab26607279834a95c25a19bb8595e'
     print('If you like this bot, welcome to donate ETH to the address:\n' + address)
     print('=' * 30)
-    log('TradeBot started')
+    log(LOG_INFO, 'TradeBot started')
 
-    symbols = config.TRADE_HBOT_CONFIG['symbols']
-    init_pairs = []
-    if opts.init:
-        for symbol in opts.init.split():
-            pair = symbol.upper() + 'USD'
-            if pair in symbols:
-                init_pairs.append(pair)
-            else:
-                log("Pair %s is not in symbols config" % pair)
-    bot = TradeBot(config.TRADE_HBOT_CONFIG, opts.stop_file, init_pairs)
+    init_pairs = check_pairs_in_config(opts.init)
+    recover_pairs = check_pairs_in_config(opts.recover)
+    bot = TradeBot(config.TRADE_HBOT_CONFIG, opts.stop_file, init_pairs, recover_pairs)
     bot.run()
 
 
