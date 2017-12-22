@@ -345,6 +345,10 @@ class TradeBot(object):
             if id in live_orders:
                 continue
 
+            # Checks if it is an old executed order.
+            if self._is_old_executed_order(id):
+                continue
+
             # Queries the status of this order.
             order_status = self._get_order_status(id=id)
             # Can not find this order. Give up this time.
@@ -405,6 +409,9 @@ class TradeBot(object):
 
         if not self._db:
             return
+
+        # Insert a row in old_executed_orders.
+        self._save_old_executed_order(id)
 
         # Insert a row of data to executed_orders table.
         self._db.execute("INSERT INTO executed_orders VALUES (?,?,?,?,?)",
@@ -667,6 +674,19 @@ class TradeBot(object):
     def check_order_status(self, id):
         print(self._get_order_status(id=id))
 
+    def _save_old_executed_order(self, id):
+        """Saves an order that is executed into db."""
+        self._db.execute("INSERT INTO old_executed_orders VALUES (?)", (id,))
+
+    def _is_old_executed_order(self, id):
+        """Checks if an order is executed."""
+        c = self._db.execute("SELECT 1 FROM old_executed_orders WHERE id = (?)", (id,))
+        ret = c.fetchone()
+        if ret:
+            logger.debug('%s is an order that has been cancelled', id)
+
+        return (ret is not None)
+
     def _save_should_be_cancelled_order(self, id):
         """Saves an order that should be cancelled into db."""
         self._db.execute("INSERT INTO cancelled_orders VALUES (?)", (id,))
@@ -726,6 +746,7 @@ def bootstrap_db(db):
     """Creates a database to store executed orders."""
     db.execute("""CREATE TABLE executed_orders (timestamp, symbol, side, amount, price)""")
     db.execute("""CREATE TABLE cancelled_orders (id)""")
+    db.execute("""CREATE TABLE old_executed_orders (id)""")
 
 
 def main():
