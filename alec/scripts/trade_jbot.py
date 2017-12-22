@@ -364,7 +364,7 @@ class TradeBot(object):
 
             # Executed. Record and react on it.
             elif self._order_was_executed(order_status):
-                logger.info('Executed: %s', order_status)
+                logger.info('Executed: id: %s, %s', id, order_status)
                 # Store the executed order.
                 self._record_executed(order_status)
                 # Remove it from watchlist.
@@ -391,6 +391,7 @@ class TradeBot(object):
 
     def _record_executed(self, order_status):
         """Logs and possibly stores an executed order to database."""
+        id = order_status['id']
         timestamp = order_status['timestamp']
         symbol = order_status['symbol']
         side = order_status['side']
@@ -398,8 +399,8 @@ class TradeBot(object):
         price = order_status['avg_execution_price']
         is_market = order_status['type'] == 'exchange market'
 
-        log('Executed: %s %s: %s @ %s' % (
-            side, symbol, amount, price),
+        log('Executed: %s %s %s: %s @ %s' % (
+            id, side, symbol, amount, price),
             side=side, is_market=is_market)
 
         if not self._db:
