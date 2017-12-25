@@ -20,6 +20,8 @@ from alec.api import BitfinexClientError
 from alec.api import bitfinex_v1_rest
 from alec.api import bitfinex_v2_rest
 
+DISABLE_JBOT_TAG = '.DISABLE_JBOT'
+
 EMOJI_SELL = ':heart:'
 EMOJI_BUY = ':blue_heart:'
 EMOJI_NOT_ENOUGH_COIN = ':rocket:'
@@ -166,6 +168,12 @@ class TradeBot(object):
     def run(self):
         """Runs main strategy in a loop."""
         while True:
+            if os.path.exists(DISABLE_JBOT_TAG):
+                log('Disabled by slack')
+                logger.info('Disabled by slack')
+                time.sleep(self.NORMAL_INTERVAL)
+                continue
+
             try:
                 logger.info('=' * 20)
                 log('=' * 20)
