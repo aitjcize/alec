@@ -73,7 +73,8 @@ def log(text, exception=False, side=None, need_coin=False, need_fiat=False,
         if admin:
             text = '@' + config.SLACK_ADMIN + ' ' + text
 
-        slack.chat.post_message(config.SLACK_CHANNEL, text)
+        slack.chat.post_message(config.SLACK_CHANNEL, text,
+                                as_user=True, link_names=True)
 
 
 class TradeBotError(Exception):
@@ -279,8 +280,6 @@ class TradeBot(object):
         Returns: True on success, False if order could not be cancelled.
 
         """
-        log('Cancel order %s' % id)
-
         # No matter the cancel order request succeed or not, store it
         # to db.
         self._save_should_be_cancelled_order(id)
@@ -510,8 +509,6 @@ class TradeBot(object):
 
         logger.info('New order: %s: %s %s: %s @ %s', status['id'],
                     side, symbol, amount, price)
-        log('Create %s: %s %s: %s @ %s' % (
-            status['id'], side, symbol, amount, price))
 
         return status
 
@@ -584,7 +581,6 @@ class TradeBot(object):
         balances = self._get_balances()
         for symbol, config in self._targets.iteritems():
             if symbol not in symbols_with_orders:
-                log('Create initial orders for %s' % symbol)
                 price = self._get_last_price(symbol)
                 amount = config['unit']
                 self._create_two_paired_orders(mid_price=price, symbol=symbol,
