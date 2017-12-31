@@ -535,8 +535,6 @@ class Wallet(object):
         return sorted(flow)
 
     def report(self, since, until, view=False):
-        self.show_balance()
-
         flow = self.calculate_xirr_flow(since, until, view=view)
 
         since_balance = -flow[0][1]
@@ -646,6 +644,9 @@ def create_parser():
         'Format: {currency}:{wallet}, {currency}, or {wallet}. '
         'Multiple values are separated by comma. '
         'Example: "exchange,USD:funding"')
+    parser.add_argument(
+        '--nobalance', action='store_true',
+        help='Do not show current balance')
     return parser
 
 
@@ -675,6 +676,8 @@ def main():
     if opts.fetch:
         wallet.fetch(balances, since, until)
 
+    if not opts.nobalance:
+        wallet.show_balance()
     wallet.report(since, until, view=opts.view)
 
 
