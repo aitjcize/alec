@@ -493,6 +493,7 @@ class Wallet(object):
             elif kind == 'withdraw':
                 src = currency, wallet
                 dst = 'outside'
+                amount *= -1
             elif kind == 'deposit':
                 src = 'outside'
                 dst = currency, wallet
