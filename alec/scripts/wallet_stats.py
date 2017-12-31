@@ -196,10 +196,14 @@ class Database(object):
             kind = 'fee'
         elif re.match(r'Position closed', desc):
             kind = 'fee'
+        elif re.match(r'Canceled withdrawal fee', desc):
+            kind = 'fee'
         elif re.match(r'Adjustment Margin Funding Payment', desc) or \
                 re.match(r'Margin Funding Payment', desc):
             kind = 'payment'
         elif re.match(r'^\w+ Withdrawal', desc):
+            kind = 'withdraw'
+        elif re.match(r'^Canceled withdrawal request', desc):
             kind = 'withdraw'
         elif re.match(r'^Deposit ', desc):
             kind = 'deposit'
