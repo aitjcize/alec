@@ -433,6 +433,19 @@ class FullApi(AuthedReadonlyApi):
         }
         return self.auth_req('v1/transfer', body)
 
+    def new_market_order(self, symbol, amount, side):
+        """Creates a new market order."""
+        # Fill anything positive for price.
+        body = {
+            'symbol': symbol,
+            'amount': str(amount),
+            'price': str(0.001),
+            'exchange': 'bitfinex',
+            'side': side,
+            'type': 'exchange market',
+        }
+        return self._normalize(self.auth_req('v1/order/new', body, allow_retry=False))
+
 
 def example():
     parser = argparse.ArgumentParser()
@@ -487,6 +500,15 @@ def example():
 
     # cancel order
     # output('cancel order', bfx_full_client.cancel_order(new_order_status['id']))
+
+
+    # Test new market order, check order stutus.
+    # Make sure you really want to do this before enabling them.
+    # new_order_status = bfx_full_client.new_market_order(symbol='ETCUSD', amount=0.8, side='buy')
+    # output('new market order', new_order_status)
+
+    # check order status.
+    # output('one market order', bfx.order_status(id=new_order_status['id']))
 
     # exchange
     output('orders', bfx.orders())

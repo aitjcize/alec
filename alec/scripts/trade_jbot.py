@@ -27,6 +27,7 @@ EMOJI_BUY = ':blue_heart:'
 EMOJI_NOT_ENOUGH_COIN = ':rocket:'
 EMOJI_NOT_ENOUGH_FIAT = ':anchor:'
 EMOJI_WARNING = ':fearful:'
+EMOJI_MARKET_ORDER = ':moneybag:'
 
 FIAT = 'usd'
 MAX_CANCEL_ORDER_RETRIES = 10
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 def log(text, exception=False, side=None, need_coin=False, need_fiat=False,
-        admin=False, warning=False):
+        admin=False, warning=False, is_market=False):
     """Log to stdout and slack if enabled.
 
     Args:
@@ -50,6 +51,7 @@ def log(text, exception=False, side=None, need_coin=False, need_fiat=False,
       need_fiat: Add emoji when more fiat is needed.
       admin: Notify slack admin.
       warning: Show warning sign.
+      is_market: Show market order sign.
 
     """
     print(str(datetime.datetime.now()) + '\t' + text)
@@ -64,12 +66,15 @@ def log(text, exception=False, side=None, need_coin=False, need_fiat=False,
             text = EMOJI_NOT_ENOUGH_COIN + ' ' + text
         if need_fiat:
             text = EMOJI_NOT_ENOUGH_FIAT + ' ' + text
+        if is_market:
+            text = EMOJI_MARKET_ORDER + ' ' + text
         if warning:
             text = EMOJI_WARNING + ' ' + text
         if admin:
             text = '@' + config.SLACK_ADMIN + ' ' + text
 
-        slack.chat.post_message(config.SLACK_CHANNEL, text)
+        slack.chat.post_message(config.SLACK_CHANNEL, text,
+                                as_user=True, link_names=True)
 
 
 class TradeBotError(Exception):
@@ -78,7 +83,8 @@ class TradeBotError(Exception):
 
 class TradeBot(object):
     NORMAL_INTERVAL = 30
-    POST_RESULT_INTERVAL = 300
+    POST_RESULT_INTERVAL = 60 * 30
+    WAIT_MARKET_ORDER_SECS = 5
 
     def __init__(self, targets, db):
         """Inits a trade bot.
@@ -104,7 +110,9 @@ class TradeBot(object):
         self._db = db
         # Record the order to be cancelled if one order is executed.
         self._paired_orders = {}
-        self._last_time_post_result = 0
+        self._last_time_post_result = time.time()
+        # Watchlist for market orders.
+        self._watched_market_orders = {}
 
     def _normalize_target(self):
         """Normalize some configs."""
@@ -121,11 +129,6 @@ class TradeBot(object):
         """Gets latest price of a symbol."""
         ticker = self._v1_client.ticker(symbol)
         return ticker['last_price']
-
-    def _log_total_value(self):
-        """Logs total value."""
-        total_value = self._get_account_info(print_log=False)
-        log('Total value: %s' % total_value)
 
     def _get_account_info(self, print_log=False):
         """Shows balances and value and get total value.
@@ -165,7 +168,6 @@ class TradeBot(object):
 
     def run(self):
         """Runs main strategy in a loop."""
-        self._get_account_info(print_log=True)
         while True:
             if os.path.exists(DISABLE_JBOT_TAG):
                 log('Disabled by slack')
@@ -236,6 +238,11 @@ class TradeBot(object):
 
         return True
 
+    def _get_live_order_ids(self):
+        """Gets a list of live order ids."""
+        orders = self._v1_client.orders()
+        return [order['id'] for order in orders]
+
     def _check_new_watched_orders(self):
         """Finds any live order that should be put into the watchlist."""
         orders = self._v1_client.orders()
@@ -273,8 +280,6 @@ class TradeBot(object):
         Returns: True on success, False if order could not be cancelled.
 
         """
-        log('Cancel order %s' % id)
-
         # No matter the cancel order request succeed or not, store it
         # to db.
         self._save_should_be_cancelled_order(id)
@@ -336,10 +341,21 @@ class TradeBot(object):
         """
         # This balances will be reused for this iteration.
         balances = self._get_balances()
+
+        # Check live orders in one API call to save rate limit.
+        live_orders = self._get_live_order_ids()
+
         # Put watched ids in a list because we will remove items in the
         # dict in for loop. Use list since keys() returns an iterator
         # in Python 3.
         for id in list(self._watched_orders.keys()):
+            if id in live_orders:
+                continue
+
+            # Checks if it is an old executed order.
+            if self._is_old_executed_order(id):
+                continue
+
             # Queries the status of this order.
             order_status = self._get_order_status(id=id)
             # Can not find this order. Give up this time.
@@ -359,10 +375,7 @@ class TradeBot(object):
 
             # Executed. Record and react on it.
             elif self._order_was_executed(order_status):
-                # Log total value after an order is executed.
-                self._log_total_value()
-
-                logger.info('Executed: %s', order_status)
+                logger.info('Executed: id: %s, %s', id, order_status)
                 # Store the executed order.
                 self._record_executed(order_status)
                 # Remove it from watchlist.
@@ -389,18 +402,23 @@ class TradeBot(object):
 
     def _record_executed(self, order_status):
         """Logs and possibly stores an executed order to database."""
+        id = order_status['id']
         timestamp = order_status['timestamp']
         symbol = order_status['symbol']
         side = order_status['side']
         amount = order_status['original_amount']
         price = order_status['avg_execution_price']
+        is_market = order_status['type'] == 'exchange market'
 
-        log('Executed: %s %s: %s @ %s' % (
-            side, symbol, amount, price),
-            side=side)
+        log('Executed: %s %s %s: %s @ %s' % (
+            id, side, symbol, amount, price),
+            side=side, is_market=is_market)
 
         if not self._db:
             return
+
+        # Insert a row in old_executed_orders.
+        self._save_old_executed_order(id)
 
         # Insert a row of data to executed_orders table.
         self._db.execute("INSERT INTO executed_orders VALUES (?,?,?,?,?)",
@@ -440,7 +458,7 @@ class TradeBot(object):
         sell_target_ratio = decimal.Decimal(1.0) + target_config['step']
         sell_price = mid_price * sell_target_ratio
 
-        status = self._create_new_order(
+        status = self._create_new_limit_order(
                 symbol=symbol, price=sell_price, amount=amount, side='sell')
         if status:
             sell_order_id = status['id']
@@ -454,7 +472,7 @@ class TradeBot(object):
         buy_target_ratio = decimal.Decimal(1.0) - target_config['step']
         buy_price = mid_price * buy_target_ratio
 
-        status = self._create_new_order(
+        status = self._create_new_limit_order(
                 symbol=symbol, price=buy_price, amount=amount, side='buy')
         if status:
             buy_order_id = status['id']
@@ -470,8 +488,8 @@ class TradeBot(object):
             self._paired_orders[sell_order_id] = buy_order_id
             self._paired_orders[buy_order_id] = sell_order_id
 
-    def _create_new_order(self, symbol, price, amount, side):
-        """Creates a new order and returns the order status.
+    def _create_new_limit_order(self, symbol, price, amount, side):
+        """Creates a new limit order and returns the order status.
 
         Returns: Order status on success. None on failure because of
                  not enough coin/fiat in exchange wallet.
@@ -491,7 +509,33 @@ class TradeBot(object):
 
         logger.info('New order: %s: %s %s: %s @ %s', status['id'],
                     side, symbol, amount, price)
-        log('Create %s: %s %s: %s @ %s' % (
+
+        return status
+
+    def _create_new_market_order(self, symbol, amount, price, side):
+        """Creates a new market order and returns the order status.
+
+        Price passed to this function is only for logging.
+
+        Returns: Order status on success. None on failure because of
+                 not enough coin/fiat in exchange wallet.
+
+        """
+        try:
+            status = self._v1_client.new_market_order(
+                symbol=symbol, amount=amount, side=side)
+        except BitfinexClientError as e:
+            # Not enough fiat or coin in exchange wallet.
+            if 'Invalid order: not enough' in str(e):
+                log(str(e), warning=True)
+                logger.warning('Invalid order: %s', str(e))
+                return None
+            else:
+                raise
+
+        logger.info('New market order: %s: %s %s: %s @ ~ %s', status['id'],
+                    side, symbol, amount, price)
+        log('Create market %s: %s %s: %s @ ~ %s' % (
             status['id'], side, symbol, amount, price))
 
         return status
@@ -537,14 +581,76 @@ class TradeBot(object):
         balances = self._get_balances()
         for symbol, config in self._targets.iteritems():
             if symbol not in symbols_with_orders:
-                log('Create initial orders for %s' % symbol)
                 price = self._get_last_price(symbol)
                 amount = config['unit']
                 self._create_two_paired_orders(mid_price=price, symbol=symbol,
                                                amount=amount, balances=balances)
 
+    def _check_create_market_orders(self):
+        """Checks if any wallet is too less and need to create market order."""
+        balances = self._get_balances()
+        # Reuse balances
+        for symbol, v in self._targets.iteritems():
+            coin_info = self._get_wallet_info(currency=v['currency'],
+                                              balances=balances)
+            coin_amount = coin_info['amount']
+            coin_unit = v['unit']
+            last_price = self._get_last_price(symbol)
+
+            # Sometimes wallet contains false amount of coin, that is, 0.
+            # Ignore such case.
+            if coin_amount == 0:
+                continue
+
+            # Create market order to buy coin if there are only 3 units left.
+            threshold_amount = coin_unit * 3
+            if coin_amount < threshold_amount:
+                logger.info('%s: Only %s left, less than 3 units: %s. '
+                            'Buy 2 units.',
+                            symbol, coin_amount, threshold_amount)
+                for _ in xrange(2):
+                    status = self._create_new_market_order(
+                            symbol=symbol,
+                            amount=coin_unit,
+                            price=last_price,
+                            side='buy')
+                    if status:
+                        order_id = status['id']
+                        # Add the new market order to market order watchlist.
+                        self._watched_market_orders[order_id] = status
+                    else:
+                        log('Not enough %s to create a %s buy order for '
+                            '%s @ %s' % (FIAT, symbol, coin_unit, last_price),
+                            need_fiat=True)
+
+    def _check_market_orders(self):
+        """Checks and records market order status."""
+        for id in self._watched_market_orders.keys():
+            order_status = self._get_order_status(id=id)
+            # Can not find this order. Give up this time.
+            if order_status is None:
+                continue
+
+            # Cancelled, so remove it from watchlist.
+            if self._order_was_cancelled(order_status):
+                self._watched_market_orders.pop(id)
+
+            # Executed. Record it.
+            elif self._order_was_executed(order_status):
+                logger.info('Executed market order: %s', order_status)
+                # Store the executed order.
+                self._record_executed(order_status)
+                # Remove it from watchlist.
+                self._watched_market_orders.pop(id)
+
     def _trade_strategy(self):
         """Main logic of trade strategy."""
+        self._check_create_market_orders()
+        logger.debug('watched_market_orders: %s',
+                     pprint.pformat(self._watched_market_orders))
+        time.sleep(self.WAIT_MARKET_ORDER_SECS)
+        self._check_market_orders()
+
         # Check if there is any new open order to be watched.
         # This might happen if there is order before trade starts.
         self._check_new_watched_orders()
@@ -572,6 +678,19 @@ class TradeBot(object):
     def check_order_status(self, id):
         print(self._get_order_status(id=id))
 
+    def _save_old_executed_order(self, id):
+        """Saves an order that is executed into db."""
+        self._db.execute("INSERT INTO old_executed_orders VALUES (?)", (id,))
+
+    def _is_old_executed_order(self, id):
+        """Checks if an order is executed."""
+        c = self._db.execute("SELECT 1 FROM old_executed_orders WHERE id = (?)", (id,))
+        ret = c.fetchone()
+        if ret:
+            logger.debug('%s is an order that has been cancelled', id)
+
+        return (ret is not None)
+
     def _save_should_be_cancelled_order(self, id):
         """Saves an order that should be cancelled into db."""
         self._db.execute("INSERT INTO cancelled_orders VALUES (?)", (id,))
@@ -580,12 +699,19 @@ class TradeBot(object):
         """Checks if an order should be cancelled."""
         c = self._db.execute("SELECT 1 FROM cancelled_orders WHERE id = (?)", (id,))
         ret = c.fetchone()
-        logger.debug('%s is an order that should be cancelled', id)
+        if ret:
+            logger.debug('%s is an order that should be cancelled', id)
 
         return (ret is not None)
 
     def _post_result_to_slack(self):
         """Posts today result to slack."""
+        # Guard this call with some sleep time before and after it
+        # to avoid hitting API rate limit.
+        time.sleep(20)
+        self._get_account_info(print_log=True)
+        time.sleep(20)
+
         c = self._db.execute("SELECT * FROM today")
         today = c.fetchall()
 
@@ -593,7 +719,7 @@ class TradeBot(object):
           log('No result for today yet')
           return
 
-        log('=-=' * 40)
+        log('=-=' * 10)
 
         lines = []
         for date, side, count, value in today:
@@ -602,7 +728,7 @@ class TradeBot(object):
 
         log('\n'.join(lines))
 
-        log('*.*' * 40)
+        log('*.*' * 10)
 
         c = self._db.execute("SELECT * FROM today_coin")
         today_coins = c.fetchall()
@@ -613,17 +739,18 @@ class TradeBot(object):
                     '{:>10s}'.format(side),
                     '{:>10d}'.format(count),
                     '{:>20s}'.format(str(value)))
-            lines.append('-.-' * 40)
+            lines.append('-.-' * 10)
             lines.append(line)
 
         log('\n'.join(lines))
-        log('=-=' * 40)
+        log('=-=' * 10)
 
 
 def bootstrap_db(db):
     """Creates a database to store executed orders."""
     db.execute("""CREATE TABLE executed_orders (timestamp, symbol, side, amount, price)""")
     db.execute("""CREATE TABLE cancelled_orders (id)""")
+    db.execute("""CREATE TABLE old_executed_orders (id)""")
 
 
 def main():
@@ -672,15 +799,16 @@ def main():
         monitor.check_order_status(opts.order_status)
         return
 
+    # Notify admin when trade bot starts.
+    # If there is something wrong and tradebot runs in a loop,
+    # admin will know.
+    log('Tradebot started', admin=True)
+
     # Possibly clean up orders first.
     if opts.clean_up_orders:
         log('Tradebot clean up orders', admin=True)
         monitor.clean_up_orders()
 
-    # Notify admin when trade bot starts.
-    # If there is something wrong and tradebot runs in a loop,
-    # admin will know.
-    log('Tradebot started', admin=True)
     monitor.run()
 
 
