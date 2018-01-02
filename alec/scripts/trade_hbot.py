@@ -445,7 +445,7 @@ class LendBotControl(object):
     MOVE_WALLET_COOLDOWN_SEC = 60
     # Use this value to calculate the minimum required balance.
     # If exchange balance is less than the value, stop lendbot.
-    NUM_ORDERS_TO_PREPARE = 5
+    NUM_ORDERS_TO_PREPARE = 6
 
     def __init__(self, stop_file, bot_config):
         self._lendbot_file = stop_file
@@ -857,6 +857,8 @@ class TradeBot(object):
             cancel_price = self._helper.get_lower_price(
                 cfg, self._last_price[symbol], 5)
             for _, order in orders.items():
+                if not self._helper.is_bot_order(cfg, order):
+                    continue
                 if order.amount_orig > 0 and order.price < cancel_price:
                     cancel_orders.append(order)
         for order in cancel_orders:
@@ -875,7 +877,10 @@ class TradeBot(object):
         self._orders[pair] = {}
 
         cfg = self._symbols[pair]
-        num_coins = self._num_coins[pair[:3]]
+        currency = pair[:3]
+        num_coins = 0
+        if currency in self._num_coins:
+            num_coins = self._num_coins[currency]
         if self.check_and_buy_currency(pair, cfg, num_coins):
             log(LOG_INFO, 'Wait for currency ready')
             return
@@ -906,7 +911,7 @@ class TradeBot(object):
 
     def view_status(self):
         """ Print how many orders should be added when bot stop """
-        for pair in self._symbols:
+        for pair in sorted(self._symbols):
             if not self._last_price[pair]:
                 continue
             lowest_price = 0
