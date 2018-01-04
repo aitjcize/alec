@@ -24,7 +24,7 @@ export TRADE_JBOT_DB=
 # export TRADE_HBOT_CONFIG="{
 #   'buy_currency': True,
 #   'retry_in_error': True,
-#   'retry_in_timeout': False,
+#   'retry_in_timeout': True,
 #   'control_lendbot': {
 #     'enable': True,
 #     'target': 1.5,
@@ -32,7 +32,7 @@ export TRADE_JBOT_DB=
 #     'stop_threshold': 1.0,
 #   },
 #   'symbols': {
-#     'OMGUSD': {'percent': 1.025, 'profit': 2, 'amount': 200, 'type': 'usd', 'limit': 0}
+#     'OMGUSD': {'percent': 1.025, 'profit': 2, 'amount': 200, 'type': 'usd', 'limit': 0, 'hold': 100}
 #   }
 # }"
 #
@@ -42,6 +42,7 @@ export TRADE_JBOT_DB=
 # The ratio should be start_threshold > target > stop_threshold.
 #
 # limit parameter is optional. If limit is 0 or omitted, it means unlimited.
+# hold parameter is optional. It means how many cryptocurrency you want to hold.
 # If type is crypto, buy/sell fixed amount of crypto currency
 #   Take OMGUSDD for example, drop 2.5%, buy 25 OMG
 #   rise (1.025)**2 = 5.06%, sell 25 OMG
