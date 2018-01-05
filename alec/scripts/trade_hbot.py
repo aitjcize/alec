@@ -398,6 +398,7 @@ class TradeHelper(object):
         Return MAX_SELL_TIMES means too many
         Return -1 if error
         """
+        balance -= Decimal(cfg['hold'])
         if cfg['type'].upper() == 'CRYPTO':
             return int(balance / Decimal(cfg['amount']))
         elif cfg['type'].upper() == 'USD':
@@ -419,6 +420,7 @@ class TradeHelper(object):
         """ Check the balance reach limit or not """
         if cfg['limit'] == 0:
             return False
+        balance -= Decimal(cfg['hold'])
         if cfg['type'].upper() == 'CRYPTO':
             if float(balance) >= cfg['amount'] * cfg['limit']:
                 return True
@@ -576,6 +578,7 @@ class TradeBot(object):
             self._orders[symbol] = {}
             self._last_price[symbol] = 0
             self._last_add_timestamp[symbol] = 0
+
         callbacks = {
             'reset': self.reset,
             'process_wallet': self.process_wallet,
@@ -608,7 +611,7 @@ class TradeBot(object):
             self.check_order_snapshot()
             self.check_wallet_snapshot()
             self.check_order_timeout()
-            self.cancel_buy_orders()
+            self.cancel_all_buy_orders()
             self.check_escape()
             self._slack.check_files()
             time.sleep(0.5)
@@ -684,8 +687,8 @@ class TradeBot(object):
                 ' %s' % (order.symbol, order.amount_orig, order.price,
                          note.text))
             pair = order.symbol[1:]
-            retry = self.remove_unconfirm_order(pair, order.price,
-                                                order.amount_orig)
+            (retry, price) = self.remove_unconfirm_order(pair, order.price,
+                                                         order.amount_orig)
             if self.retry_order_in_error:
                 if 'not enough exchange' in note.text and retry <= 0:
                     pass
@@ -694,7 +697,7 @@ class TradeBot(object):
                 elif retry > 0:
                     log(LOG_INFO, 'Need to retry order, retry times: %d' %
                         retry)
-                    self.new_order(pair, order.price, order.amount_orig,
+                    self.new_order(pair, price, order.amount_orig,
                                    retry - 1)
         elif note.type == 'on-req' and note.status == 'SUCCESS':
             order = bitfinex_v2_rest.Order(note.notify_info)
@@ -729,31 +732,39 @@ class TradeBot(object):
 
     def check_order_timeout(self):
         """ Check unconfirmed orders is timeout or not """
+        if not self._received_order_snapshot:
+            return
         temp_orders = list(self._unconfirm_orders)
         retry_orders = []
         for order in self._unconfirm_orders:
             if (time.time() - order[3]) > self.ORDER_TIMEOUT_SEC:
                 log(LOG_ERROR, 'Order %s with amount: %f, price: %f timeout. '
-                    'Need to retry' % (order[0], order[2], order[1]))
+                    'Need to retry, retry times: %d' % (
+                        order[0], order[2], order[1], order[4]))
                 temp_orders.remove(order)
                 retry_orders.append(order)
         self._unconfirm_orders = temp_orders
         if self.retry_order_in_timeout:
             for order in retry_orders:
-                self.new_order(order.symbol[1:], order.price, order.amount)
+                if order[4] > 0:  # retry
+                    self.new_order(order[0], order[2], order[1], order[4] - 1)
 
     def remove_unconfirm_order(self, pair, price, amount):
         """ Remove an order from unconfirmed list """
         temp_orders = self._unconfirm_orders
         retry_times = 0
+        real_price = price
         for order in self._unconfirm_orders:
             if (order[0] == pair and
-                    math.isclose(order[1], price, rel_tol=0.01) and
                     math.isclose(order[2], amount, rel_tol=0.01)):
-                retry_times = order[4]
-                temp_orders.remove(order)
+                if (math.isclose(order[1], price, rel_tol=0.01) or
+                        not order[1]):
+                    retry_times = order[4]
+                    # For market order, the price should be 0
+                    real_price = order[1]
+                    temp_orders.remove(order)
         self._unconfirm_orders = temp_orders
-        return retry_times
+        return (retry_times, real_price)
 
     def check_and_buy_currency(self, pair, cfg, balance):
         """
@@ -836,9 +847,8 @@ class TradeBot(object):
         """ Create an new order """
         if retry_times is None:
             retry_times = self.NO_BALANCE_RETRY_TIMES
-        if price > 0:  # limit order
-            self._unconfirm_orders.append(
-                    [pair, price, amount, time.time(), retry_times])
+        self._unconfirm_orders.append(
+            [pair, price, amount, time.time(), retry_times])
         self._wsapi.new_order(pair, price, amount)
         log(LOG_VERBOSE, 'Create a new %s order with amount: %f, price: %f' %
             (pair, amount, price))
@@ -847,7 +857,7 @@ class TradeBot(object):
         """ Cancel one order """
         self._wsapi.cancel_order(order.id)
 
-    def cancel_buy_orders(self):
+    def cancel_all_buy_orders(self):
         """ Remove buy orders which price is too far from current price """
         cancel_orders = []
         for symbol, orders in self._orders.items():
@@ -911,6 +921,8 @@ class TradeBot(object):
 
     def view_status(self):
         """ Print how many orders should be added when bot stop """
+        msg = ''
+        active_pairs = 'Active:'
         for pair in sorted(self._symbols):
             if not self._last_price[pair]:
                 continue
@@ -923,18 +935,23 @@ class TradeBot(object):
                 if lowest_price == 0 or order.price < lowest_price:
                     lowest_price = order.price
 
-            if no_miss:
-                continue
-            cfg = self._symbols[pair]
-            current_price = self._last_price[pair]
-            miss_price = self._helper.get_lower_price(
-                cfg, lowest_price, cfg['profit'] + 1)
-            miss_times = 1
-            while miss_price > current_price:
-                miss_times += 1
-                miss_price = self._helper.get_lower_price(cfg, miss_price, 1)
-            log(LOG_INFO, '%s sell %.4f, current %.4f, miss %d orders' % (
-                pair, lowest_price, current_price, miss_times))
+            if not no_miss:
+                cfg = self._symbols[pair]
+                current_price = self._last_price[pair]
+                miss_price = self._helper.get_lower_price(
+                    cfg, lowest_price, cfg['profit'] + 1)
+                miss_times = 1
+                while miss_price > current_price:
+                    miss_times += 1
+                    miss_price = self._helper.get_lower_price(
+                        cfg, miss_price, 1)
+                msg += '%s miss %d, gap %.3f, now %.3f\n' % (
+                    pair[:3], miss_times, lowest_price - current_price,
+                    current_price)
+            else:
+                active_pairs += ' %s' % pair[:3]
+        msg = active_pairs + '\n' + msg
+        log(LOG_INFO, msg)
 
     def check_orders_during_disconnect(self):
         """ Check executed orders during disconnection """
@@ -1037,6 +1054,8 @@ def check_config():
     for symbol in config.TRADE_HBOT_CONFIG['symbols']:
         if 'limit' not in config.TRADE_HBOT_CONFIG['symbols'][symbol]:
             config.TRADE_HBOT_CONFIG['symbols'][symbol]['limit'] = 0
+        if 'hold' not in config.TRADE_HBOT_CONFIG['symbols'][symbol]:
+            config.TRADE_HBOT_CONFIG['symbols'][symbol]['hold'] = 0
         if 'type' not in config.TRADE_HBOT_CONFIG['symbols'][symbol]:
             print('Pair %s miss type setting' % symbol)
             return False
