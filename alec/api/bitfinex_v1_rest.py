@@ -32,14 +32,9 @@ def rate_limit(period):
     """
     last_call_time = {}
 
-    if period < 6:
-        period = 6
-
     def decorator(func):
         def wrapper(*args, **kargs):
-            now = time.time()
-            delta = now - last_call_time.get(func, 0)
-            last_call_time[func] = now
+            delta = time.time() - last_call_time.get(func, 0)
             if delta < period:
                 logger.debug(
                     '%s was called too frequently. delay %s seconds',
@@ -132,15 +127,18 @@ class PublicApi(object):
             result[k] = v
         return result
 
-    @rate_limit(60. / 30)
+    # 1.5 is not enough
+    @rate_limit(2)
     def ticker(self, symbol):
         return self._normalize(self.public_req('v1/ticker/%s' % symbol))
 
-    @rate_limit(60. / 10)
+    # 6 is not enough
+    @rate_limit(7)
     def stats(self, symbol):
         return self._normalize(self.public_req('v1/stats/%s' % symbol))
 
-    @rate_limit(60. / 45)
+    # 6 is not enough
+    @rate_limit(7)
     def funding_book(self, currency, limit_bids=None, limit_asks=None):
         params = {}
         if limit_bids is not None:
@@ -150,7 +148,8 @@ class PublicApi(object):
         return self._normalize(
             self.public_req('v1/lendbook/%s' % currency, params))
 
-    @rate_limit(60. / 45)
+    # 2.5 is not enough
+    @rate_limit(3)
     def trades(self, symbol, timestamp=None, limit=None):
         params = {}
         if timestamp:
@@ -160,7 +159,8 @@ class PublicApi(object):
         return self._normalize(
             self.public_req('v1/trades/%s' % symbol, params))
 
-    @rate_limit(60. / 60)
+    # 1 is not enough
+    @rate_limit(2)
     def lends(self, currency, timestamp=None, limit=None):
         """Get a list of the most recent funding data for the given currency:
         total amount provided and Flash Return Rate (in % by 365 days) over
@@ -174,7 +174,8 @@ class PublicApi(object):
         return self._normalize(
             self.public_req('v1/lends/%s' % currency, params))
 
-    @rate_limit(60. / 5)
+    # 14 is not enough
+    @rate_limit(16)
     def symbols(self):
         return self.public_req('v1/symbols')
 
@@ -221,9 +222,11 @@ class AuthedReadonlyApi(PublicApi):
                     logger.warning('server error, sleep a while')
                     time.sleep(2**i)
                     continue
-                if resp.status_code == 400 and 'Ratelimit' in resp.text:
-                    logger.warning('hit rate limit, sleep 20 seconds')
-                    time.sleep(20)
+                # 429 'Too Many Requests'
+                if (resp.status_code == 400 and 'Ratelimit' in resp.text) or \
+                   (resp.status_code == 429 and 'ERR_RATE_LIMIT' in resp.text):
+                    logger.warning('hit rate limit, sleep 30 seconds')
+                    time.sleep(30)
                     continue
             break
 
@@ -247,20 +250,29 @@ class AuthedReadonlyApi(PublicApi):
         return self._normalize(
             self.auth_req('v1/account_fees', allow_retry=True))
 
+    # this endpoint seems have no rate limit. set 1 just in case
+    @rate_limit(1)
     def summary(self):
         return self._normalize(self.auth_req('v1/summary', allow_retry=True))
 
+    # this endpoint seems have no rate limit. set 1 just in case
+    @rate_limit(1)
     def key_info(self):
         return self._normalize(self.auth_req('v1/key_info', allow_retry=True))
 
+    # this endpoint seems have no rate limit. set 1 just in case
+    @rate_limit(1)
     def margin_info(self):
         return self._normalize(
             self.auth_req('v1/margin_infos', allow_retry=True))
 
-    @rate_limit(60. / 20)
+    # 6 is not enough
+    @rate_limit(7)
     def balances(self):
         return self._normalize(self.auth_req('v1/balances', allow_retry=True))
 
+    # 3 is not enough
+    @rate_limit(4)
     def orders(self):
         return self._normalize(self.auth_req('v1/orders', allow_retry=True))
 
@@ -276,7 +288,8 @@ class AuthedReadonlyApi(PublicApi):
         }
         return self._normalize(self.auth_req('v1/order/cancel', body, allow_retry=True))
 
-    @rate_limit(60. / 1)
+    # 55 is not enough
+    @rate_limit(60)
     def orders_history(self):
         return self._normalize(
             self.auth_req('v1/orders/hist', allow_retry=True))
@@ -284,7 +297,8 @@ class AuthedReadonlyApi(PublicApi):
     def positions(self):
         return self._normalize(self.auth_req('v1/positions', allow_retry=True))
 
-    @rate_limit(60. / 20)
+    # 6 is not enough
+    @rate_limit(7)
     def history(self,
                 currency,
                 since=None,
@@ -312,6 +326,8 @@ class AuthedReadonlyApi(PublicApi):
         return self._normalize(
             self.auth_req('v1/history', params, allow_retry=True))
 
+    # 6 is not enough
+    @rate_limit(7)
     def movements(self,
                   currency,
                   method=None,
@@ -353,10 +369,12 @@ class AuthedReadonlyApi(PublicApi):
             params['limit_trades'] = limit_trades
         return self._normalize(self.auth_req('v1/mytrades', allow_retry=True))
 
+    @rate_limit(1)
     def credits(self):
         """View your funds currently taken (active credits)."""
         return self._normalize(self.auth_req('v1/credits', allow_retry=True))
 
+    @rate_limit(1)
     def offers(self):
         """View your active offers."""
         return self._normalize(self.auth_req('v1/offers', allow_retry=True))
@@ -373,13 +391,15 @@ class AuthedReadonlyApi(PublicApi):
         return self._normalize(
             self.auth_req('v1/offers/hist', params, allow_retry=True))
 
-    @rate_limit(60. / 45)
+    # this endpoint seems have no rate limit. set 1 just in case
+    @rate_limit(1)
     def mytrades_funding(self, symbol):
         """View your past trades."""
         params = dict(symbol=symbol)
         return self._normalize(
             self.auth_req('v1/mytrades_funding', params, allow_retry=True))
 
+    @rate_limit(1)
     def taken_funds(self):
         """active margin funds"""
         return self._normalize(
