@@ -6,9 +6,11 @@ import datetime
 import decimal
 import json
 import logging
+import math
 import os
 import re
 import sqlite3
+import sys
 import textwrap
 import time
 
@@ -99,11 +101,25 @@ def xirr(flow, period=365 * secs_per_day, approx=None):
             total += f[1] / pow(rate, d)
         return total
 
-    l = 1e-10
-    r = 1e10
+    # The range to binary search.
+    # This should be large enough --- xirr(year) breaks only if xirr(day) is
+    # larger than max**(1./365)=699%.
+    l = sys.float_info.min
+    r = sys.float_info.max
+
+    # Make sure the range is sound -- one is too small and the other is too
+    # large.
     assert pv(l) * pv(r) <= 0
-    while l + 0.00000001 < r:
-        m = (l + r) / 2
+
+    # I don't understand this line well. I guess sqrt() is required here
+    # because the precision is reduced when calculate sqrt(l*r).
+    while (1 + math.sqrt(sys.float_info.epsilon)) * l < r:
+        # This is much faster than "m = (l + r) / 2".
+        # With (l+r)/2, it requires roughly 1000 steps to binary search.
+        # With sqrt(l*r), it requires only about 45 steps.
+        # p.s. l*r will overflow, so do sqrt() separately.
+        m = math.sqrt(l) * math.sqrt(r)
+
         pv_m = pv(m)
         if pv_m == 0:
             return m - 1
