@@ -391,7 +391,7 @@ class TradeHelper(object):
                     return True
         return False
 
-    def get_remain_times(self, cfg, price, balance):
+    def get_remain_times(self, pair, cfg, price, balance):
         """
         Get remain times of a pair for sell.
         Return times
@@ -399,6 +399,10 @@ class TradeHelper(object):
         Return -1 if error
         """
         balance -= Decimal(cfg['hold'])
+        if balance < Decimal(0):
+            log(LOG_ERROR, '%s balance is less than hold amount %f' % (
+                pair, cfg['hold']))
+            return -1
         if cfg['type'].upper() == 'CRYPTO':
             return int(balance / Decimal(cfg['amount']))
         elif cfg['type'].upper() == 'USD':
@@ -421,6 +425,8 @@ class TradeHelper(object):
         if cfg['limit'] == 0:
             return False
         balance -= Decimal(cfg['hold'])
+        if balance < Decimal(0):
+            return False
         if cfg['type'].upper() == 'CRYPTO':
             if float(balance) >= cfg['amount'] * cfg['limit']:
                 return True
@@ -758,7 +764,7 @@ class TradeBot(object):
             if (order[0] == pair and
                     math.isclose(order[2], amount, rel_tol=0.01)):
                 if (math.isclose(order[1], price, rel_tol=0.01) or
-                        not order[1]):
+                        order[1] == 0):
                     retry_times = order[4]
                     # For market order, the price should be 0
                     real_price = order[1]
@@ -770,12 +776,16 @@ class TradeBot(object):
         """
         Check the number of orders to sell. If the number is less than expected
         number, buy two orders at market price.
-        Return True if the number of orders is too small
+        Return -1 if error
+        Return 0 if the number of orders is enough
+        Return 1 if the number of orders is not enough, should chase currency
         """
         price = self._last_price[pair]
         if price == 0:
-            return False
-        remain_times = self._helper.get_remain_times(cfg, price, balance)
+            return -1
+        remain_times = self._helper.get_remain_times(pair, cfg, price, balance)
+        if remain_times == -1:
+            return -1
         if remain_times <= self.NUM_ORDERS_TO_HOLD:
             log(LOG_INFO, 'Pair %s is not enough: %f' % (pair, balance))
             allow_buy = time.time() - self._last_add_timestamp[pair] > (
@@ -785,8 +795,8 @@ class TradeBot(object):
                 amount = self._helper.get_buy_amount_at_price(cfg, price)
                 self.new_order(pair, 0, amount * units)
                 self._last_add_timestamp[pair] = time.time()
-            return True
-        return False
+            return 1
+        return 0
 
     def handle_executed_order(self, order, cfg, normal=True):
         """
@@ -804,7 +814,7 @@ class TradeBot(object):
         # if normal is False, it means the function is called for disconnection
         # orders. We don't need to check amount since the amount is out of
         # date.
-        if not math.isclose(order.amount, 0, rel_tol=0.00001) and normal:
+        if not math.isclose(order.amount, 0, abs_tol=0.00001) and normal:
             return
         else:
             log(LOG_INFO, 'Executed an order, pair: %s, amount: %f, price: %f,'
@@ -891,10 +901,13 @@ class TradeBot(object):
         num_coins = 0
         if currency in self._num_coins:
             num_coins = self._num_coins[currency]
-        if self.check_and_buy_currency(pair, cfg, num_coins):
+        ret = self.check_and_buy_currency(pair, cfg, num_coins)
+        if ret == 1:
             log(LOG_INFO, 'Wait for currency ready')
             return
-
+        elif ret == -1:
+            self._init_pairs.remove(pair)
+            return
         self.set_orders_by_price(pair, cfg, self._last_price[pair], 'BUY')
 
         log(LOG_INFO, 'Already initialized %s' % pair)
