@@ -13,6 +13,7 @@ import time
 import os
 from decimal import Decimal
 
+import json
 import pytz
 import requests
 import slacker
@@ -52,11 +53,11 @@ def timestamp_to_string(timestamp):
 
 def log(level, text, emoji=None):
     """ Print a log to file, console, and slack """
-    if level > LOG_LEVEL:
-        return
     timestamp = timestamp_to_string(time.time())
     with open('log', 'a') as log_fd:
         log_fd.write(timestamp + '\t' + text + '\n')
+    if level > LOG_LEVEL:
+        return
     print(timestamp + '\t' + text)
     try:
         if SLACK:
@@ -70,6 +71,8 @@ def log(level, text, emoji=None):
         print('Slack api erorr')
     except requests.exceptions.HTTPError:
         print('Slack time out')
+    except json.decoder.JSONDecodeError:
+        print('Slack data error')
 
 
 class WebSocketApi(object):
@@ -569,6 +572,7 @@ class TradeBot(object):
         self._symbols = bot_config['symbols']
         self._init_pairs = args['init_pairs']
         self._recover_pairs = args['recover_pairs']
+        self._scale_amount = args['scale_amount']
         self._escape = args['escape']
 
         self._orders = {}
@@ -684,6 +688,8 @@ class TradeBot(object):
                 self.create_init_orders(pair)
             if pair in self._recover_pairs:
                 self.create_recover_orders(pair)
+            if pair in self._scale_amount:
+                self.scale_amount(pair)
 
     def process_notification(self, note):
         """ Process notification update """
@@ -906,12 +912,12 @@ class TradeBot(object):
             log(LOG_INFO, 'Wait for currency ready')
             return
         elif ret == -1:
-            self._init_pairs.remove(pair)
+            del self._init_pairs[pair]
             return
         self.set_orders_by_price(pair, cfg, self._last_price[pair], 'BUY')
 
         log(LOG_INFO, 'Already initialized %s' % pair)
-        self._init_pairs.remove(pair)
+        del self._init_pairs[pair]
 
     def create_recover_orders(self, pair):
         """ Create recover buy order of a pair """
@@ -930,7 +936,36 @@ class TradeBot(object):
             self.new_order(pair, buy_price, amount)
 
         log(LOG_INFO, 'Already recovered %s' % pair)
-        self._recover_pairs.remove(pair)
+        del self._recover_pairs[pair]
+
+    def scale_amount(self, pair):
+        """ Scale amount for pair """
+        cfg = self._symbols[pair]
+        if self._scale_amount[pair] >= cfg['amount']:
+            log(LOG_ERROR, 'Do not need scale amount')
+            del self._scale_amount[pair]
+            return
+        if pair[:3] not in self._num_coins:
+            log(LOG_ERROR, 'You do not have %s, run --init instead' % pair)
+            del self._scale_amount[pair]
+            return
+        num_coins = float(self._num_coins[pair[:3]]) - cfg['hold']
+        if num_coins <= 0:
+            log(LOG_ERROR, '%s balance is less than hold amount %f' % (
+                pair, cfg['hold']))
+            del self._scale_amount[pair]
+            return
+
+        add_coins = num_coins * (cfg['amount'] / self._scale_amount[pair] - 1.0)
+        add_coins = round(add_coins, self._helper.AMOUNT_DIGIT)
+        self.new_order(pair, 0, add_coins)
+
+        self.cancel_all_orders(pair)
+        self._orders[pair] = {}
+        self.set_orders_by_price(pair, cfg, self._last_price[pair], 'BUY')
+
+        log(LOG_INFO, 'Already scale amount %s, add %f' % (pair, add_coins))
+        del self._scale_amount[pair]
 
     def view_status(self):
         """ Print how many orders should be added when bot stop """
@@ -1016,10 +1051,10 @@ class TradeBot(object):
         """ Callback function to execute slack command """
         if command.upper() == 'INIT':
             log(LOG_INFO, 'Received init command ' + str(args))
-            self._init_pairs += args
+            self._init_pairs.update(args)
         elif command.upper() == 'RECOVER':
             log(LOG_INFO, 'Received recover command ' + str(args))
-            self._recover_pairs += args
+            self._recover_pairs.update(args)
         elif command.upper() == 'ESCAPE':
             log(LOG_INFO, 'Received escape command ' + str(args))
 #             self.check_escape()
@@ -1035,16 +1070,18 @@ class TradeBot(object):
 def check_pairs_in_config(pairs_str):
     """ Find pairs in config """
     symbols = config.TRADE_HBOT_CONFIG['symbols']
-    pairs = []
+    pairs = {}
     if pairs_str:
-        if pairs_str.upper() == 'ALL':
+        if pairs_str[:3].upper() == 'ALL':
+            arg = float(pairs_str[4:]) if pairs_str[4:] else 0
             for symbol in symbols:
-                pairs.append(symbol)
+                pairs[symbol] = arg
         else:
             for symbol in pairs_str.split():
-                pair = symbol.upper() + 'USD'
+                pair = symbol[:3].upper() + 'USD'
+                arg = float(symbol[4:]) if symbol[4:] else 0
                 if pair in symbols:
-                    pairs.append(pair)
+                    pairs[pair] = arg
                 else:
                     print("Pair %s is not in symbols config" % pair)
     return pairs
@@ -1108,6 +1145,7 @@ def main():
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--init', help='Currencies which need initial orders')
     parser.add_argument('--recover', help='Currencies which need recovery')
+    parser.add_argument('--scale_amount', help='Adjust amount for currencies')
     parser.add_argument('--escape', action='store_true',
                         help='Cancel all orders and sell all currencies')
     parser.add_argument('--stop_file',
@@ -1135,6 +1173,7 @@ def main():
     args = {}
     args['init_pairs'] = check_pairs_in_config(opts.init)
     args['recover_pairs'] = check_pairs_in_config(opts.recover)
+    args['scale_amount'] = check_pairs_in_config(opts.scale_amount)
     args['stop_file'] = opts.stop_file
     args['escape'] = opts.escape
     bot = TradeBot(config.TRADE_HBOT_CONFIG, args)
