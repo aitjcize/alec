@@ -763,9 +763,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--clean_up_orders',
-                         help='cancel all orders with matched amount. '
-                              'Default to True.',
-                         default=True,
+                         help='cancel all orders with matched amount.',
                          action='store_true')
     parser.add_argument('--order_status',
                         help='debug utility to check one order status by ID',
