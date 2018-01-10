@@ -6,6 +6,7 @@ from __future__ import print_function
 import argparse
 import datetime
 import decimal
+import json
 import logging
 import os
 import pprint
@@ -22,6 +23,7 @@ from alec.api import bitfinex_v1_rest
 from alec.api import bitfinex_v2_rest
 
 DISABLE_JBOT_TAG = '.DISABLE_JBOT'
+DISABLE_TARGET_LIST_FILE = '.DISABLE_JBOT_TARGET_LIST'
 
 EMOJI_SELL = ':heart:'
 EMOJI_BUY = ':blue_heart:'
@@ -81,6 +83,40 @@ def log(text, exception=False, side=None, need_coin=False, need_fiat=False,
             logger.exception('Timeout posting to slack.')
 
 
+def create_disable_target_set():
+    return TargetSet(DISABLE_TARGET_LIST_FILE)
+
+
+class TargetSet(object):
+    """Use this to maintain a set of targets to be disabled.
+
+    Slack daemon will update new targets through the file.
+    """
+    def __init__(self, fn):
+        self._targets = set()
+        self._fn = fn
+        self.read()
+
+    def read(self):
+        if not os.path.exists(self._fn):
+            return
+        with open(self._fn, 'r') as f:
+            self._targets = set(json.loads(f.read()))
+
+    def write(self):
+        with open(self._fn, 'w') as f:
+            f.write(json.dumps(list(self._targets)))
+
+    def has(self, target):
+        return target in self._targets
+
+    def add(self, target):
+        self._targets.add(target)
+
+    def remove(self, target):
+        self._targets.remove(target)
+
+
 class TradeBotError(Exception):
     pass
 
@@ -107,6 +143,7 @@ class TradeBot(object):
         # A dict from symbol to config for that symbol, e.g.
         # {'ETCUSD':{'unit': 1, 'step': 0.01}}
         self._targets = targets
+        self._disable_targets = create_disable_target_set()
         self._normalize_target()
         self._wallet = None
         # from ID to order
@@ -178,6 +215,9 @@ class TradeBot(object):
                 logger.info('Disabled by slack')
                 time.sleep(self.NORMAL_INTERVAL)
                 continue
+
+            # Update the latest disable list.
+            self._disable_targets.read()
 
             try:
                 logger.info('=' * 20)
@@ -402,6 +442,11 @@ class TradeBot(object):
                         warning=True)
                     continue
 
+                if self._disable_targets.has(order_status['symbol']):
+                    log('Skip creating new order for %s '
+                        'because it is disabled' % order_status['symbol'])
+                    continue
+
                 self._action_to_executed_order(order_status, balances=balances)
 
     def _record_executed(self, order_status):
@@ -584,6 +629,10 @@ class TradeBot(object):
         # balance query.
         balances = self._get_balances()
         for symbol, config in self._targets.iteritems():
+            if self._disable_targets.has(symbol):
+                log('Skip creating initial orders for %s '
+                    'because it is disabled' % symbol)
+                continue
             if symbol not in symbols_with_orders:
                 price = self._get_last_price(symbol)
                 amount = config['unit']
@@ -595,6 +644,9 @@ class TradeBot(object):
         balances = self._get_balances()
         # Reuse balances
         for symbol, v in self._targets.iteritems():
+            if self._disable_targets.has(symbol):
+                continue
+
             coin_info = self._get_wallet_info(currency=v['currency'],
                                               balances=balances)
             coin_amount = coin_info['amount']
