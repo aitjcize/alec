@@ -66,10 +66,8 @@ def log(level, text, emoji=None):
             if emoji:
                 message = emoji + ' ' + text
             SLACK.chat.post_message(config.SLACK_CHANNEL, message)
-    except slacker.Error:
-        print('Slack api erorr')
-    except requests.exceptions.HTTPError:
-        print('Slack time out')
+    except Exception:
+        logging.exception('Failed to post message to Slacker')
 
 
 class WebSocketApi(object):

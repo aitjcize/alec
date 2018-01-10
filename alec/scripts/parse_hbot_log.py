@@ -5,6 +5,7 @@
 import argparse
 import datetime
 import decimal
+import logging
 import re
 import time
 
@@ -37,8 +38,8 @@ def log(text, emoji=None):
             if emoji:
                 message = emoji + ' ' + text
             SLACK.chat.post_message(config.SLACK_CHANNEL, message)
-    except slacker.Error:
-        print("Slack api erorr")
+    except Exception:
+        logging.exception('Failed to post message to Slacker')
 
 
 def check_state(date=None):
