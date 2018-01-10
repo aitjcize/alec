@@ -9,6 +9,7 @@ import decimal
 import logging
 import os
 import pprint
+import requests
 import sqlite3
 import time
 
@@ -73,8 +74,11 @@ def log(text, exception=False, side=None, need_coin=False, need_fiat=False,
         if admin:
             text = '@' + config.SLACK_ADMIN + ' ' + text
 
-        slack.chat.post_message(config.SLACK_CHANNEL, text,
-                                as_user=True, link_names=True)
+        try:
+            slack.chat.post_message(config.SLACK_CHANNEL, text,
+                                    as_user=True, link_names=True)
+        except requests.exceptions.Timeout as e:
+            logger.exception('Timeout posting to slack.')
 
 
 class TradeBotError(Exception):
