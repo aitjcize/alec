@@ -71,7 +71,7 @@ class SlackClient(object):
             if data.get('type') == 'message':
                 if data['text'].startswith(self._mention):
                     text = data['text'][len(self._mention):].lstrip()
-                    self.process_command(text)
+                    self.process_command_and_args(text)
         except Exception as e:
             logger.exception(e)
 
@@ -93,8 +93,16 @@ class SlackClient(object):
     def pong(self):
         self.post_message('pong')
 
-    def process_command(self, command):
+    def process_command_and_args(self, text):
+        parsed = text.split(' ')
+        # This should be the command name.
+        command = parsed[0]
+        # This may be [].
+        args = parsed[1:]
         if command in self._commands:
-            self._commands[command]()
+            if args:
+                self._commands[command](*args)
+            else:
+                self._commands[command]()
         else:
             self.post_message('Command not found')
