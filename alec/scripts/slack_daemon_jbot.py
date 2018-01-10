@@ -7,7 +7,8 @@ import logging
 import os
 
 from alec import config
-from alec.scripts.trade_jbot import DISABLE_JBOT_TAG
+from alec.scripts.trade_jbot import DISABLE_JBOT_TAG, TargetSet
+from alec.scripts.trade_jbot import create_disable_target_set
 from alec.scripts.slack_daemon import SlackClient
 
 
@@ -20,8 +21,11 @@ class SlackClientJbotError(Exception):
 class SlackClientJbot(SlackClient):
     def __init__(self, *args, **kwargs):
         super(SlackClientJbot, self).__init__(*args, **kwargs)
-        self._commands['disable jbot'] = self.disable_jbot
-        self._commands['enable jbot']= self.enable_jbot
+        self._commands['disable'] = self.disable_jbot
+        self._commands['enable']= self.enable_jbot
+        self._commands['suspend']= self.suspend_jbot
+        self._commands['resume']= self.resume_jbot
+        self._disable_targets = create_disable_target_set()
 
     def disable_jbot(self):
         """Disables trade_jbot by a disabling tag."""
@@ -35,12 +39,25 @@ class SlackClientJbot(SlackClient):
         if os.path.exists(DISABLE_JBOT_TAG):
             os.remove(DISABLE_JBOT_TAG)
 
+    def suspend_jbot(self, target):
+        self._disable_targets.add(target)
+        self._disable_targets.write()
+        self.post_message('Suspend %s' % target)
+
+    def resume_jbot(self, target):
+        self._disable_targets.remove(target)
+        self._disable_targets.write()
+        self.post_message('Resume %s' % target)
+
     def help(self):
         super(SlackClientJbot, self).help()
-        self.post_message('```\n'
-                          ' - disable jbot: Disable trade_jbot.\n'
-                          ' - enable jbot: Enable trade_jbot.\n'
-                          '```')
+        self.post_message(
+            '```\n'
+            ' - disable: Disable trade_jbot.\n'
+            ' - enable: Enable trade_jbot.\n'
+            ' - suspend <target>: Suspend a target of trade_jbot.\n'
+            ' - resume <target>: Resume a target of trade_jbot.\n'
+            '```')
 
 
 if __name__ == '__main__':
