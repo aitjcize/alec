@@ -38,6 +38,7 @@ MAX_ORDER_STATUS_RETRIES = 30
 
 RATE_LIMIT_TIME = 120
 SERVER_BAD_GATEWAY_TIME = 120
+SERVER_520_TIME = 120
 
 slack = Slacker(config.SLACK_TOKEN) if config.SLACK_ENABLE else None
 logger = logging.getLogger(__name__)
@@ -242,6 +243,10 @@ class TradeBot(object):
                 if '502: Bad gateway' in str(e):
                     log('Bitfinex: sleep some time for server 502 error')
                     time.sleep(SERVER_BAD_GATEWAY_TIME)
+                    continue
+                if '520: Web server is returning an unknown error' in str(e):
+                    log('Bitfinex: sleep some time for server 520 error')
+                    time.sleep(SERVER_520_TIME)
                     continue
                 raise
             except Exception as e:
