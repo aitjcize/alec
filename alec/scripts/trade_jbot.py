@@ -239,16 +239,14 @@ class TradeBot(object):
                 if 'ERR_RATE_LIMIT' in str(e):
                     log('Bitfinex: sleep some time for rate limit')
                     time.sleep(RATE_LIMIT_TIME)
-                    continue
                 if '502: Bad gateway' in str(e):
                     log('Bitfinex: sleep some time for server 502 error')
                     time.sleep(SERVER_BAD_GATEWAY_TIME)
-                    continue
                 if '520: Web server is returning an unknown error' in str(e):
                     log('Bitfinex: sleep some time for server 520 error')
                     time.sleep(SERVER_520_TIME)
-                    continue
-                raise
+                log('Suppress all Bitfinex exceptions', exception=True)
+                continue
             except Exception as e:
                 log(str(e), exception=True)
                 raise
