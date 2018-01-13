@@ -83,6 +83,12 @@ def log(text, exception=False, side=None, need_coin=False, need_fiat=False,
                                     as_user=True, link_names=True)
         except requests.exceptions.Timeout as e:
             logger.exception('Timeout posting to slack.')
+            return
+        except requests.exceptions.HTTPError as e:
+            if '502 Server Error: Bad Gateway' in str(e):
+                logger.exception('Slack server error.')
+                return
+            raise
 
 
 def create_disable_target_set():
