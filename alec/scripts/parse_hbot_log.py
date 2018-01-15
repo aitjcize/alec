@@ -44,8 +44,12 @@ def log(text, emoji=None):
 def check_state(date=None):
     statistic = {}
     symbols = []
+    earn_percent = {}
     for symbol in config.TRADE_HBOT_CONFIG['symbols']:
         symbols.append(symbol[:3])
+        profit_percent = (config.TRADE_HBOT_CONFIG['symbols'][symbol]['percent'] **
+                          config.TRADE_HBOT_CONFIG['symbols'][symbol]['profit'])
+        earn_percent[symbol[:3]] = 1 - (1 / profit_percent)
     for symbol in symbols:
         statistic[symbol] = {'buy': (0, 0), 'sell': (0, 0)}
 
@@ -83,26 +87,29 @@ def check_state(date=None):
                 statistic[symbol][action], (1, amount * avg_price))
 
     print(date + ' ' + day_time)
-    print('SYM: %12s\t%12s\t%12s\t%12s' % (
-        'BUY_COUNT', 'BUY_SUM', 'SELL_COUNT', 'SELL_SUM', ))
+    print('SYM: %12s\t%12s\t%12s\t%12s\t%12s' % (
+        'BUY_COUNT', 'BUY_SUM', 'SELL_COUNT', 'SELL_SUM', 'EARN'))
     total_buy_count = 0
     total_buy_sum = 0
     total_sell_count = 0
     total_sell_sum = 0
+    total_earn = 0
     slack_msg = date + ' ' + day_time + ' '
     for symbol, d in sorted(statistic.items()):
         buy_count, buy_sum = map(float, d['buy'])
         sell_count, sell_sum = map(float, d['sell'])
+        earn = sell_sum * earn_percent[symbol]
         total_buy_sum += buy_sum
         total_buy_count += buy_count
         total_sell_sum += sell_sum
         total_sell_count += sell_count
-        print('%s: %12d\t%12.6f\t%12d\t%12.6f' % (
-            symbol, buy_count, buy_sum, sell_count, sell_sum))
+        total_earn += earn
+        print('%s: %12d\t%12.6f\t%12d\t%12.6f\t%12.6f' % (
+            symbol, buy_count, buy_sum, sell_count, sell_sum, earn))
         slack_msg += '%s: %d/%d, ' % (symbol, buy_count, sell_count)
 
-    print('     %12d\t%12.6f\t%12d\t%12.6f\n' % (
-        total_buy_count, total_buy_sum, total_sell_count, total_sell_sum))
+    print('     %12d\t%12.6f\t%12d\t%12.6f\t%12.6f\n' % (
+        total_buy_count, total_buy_sum, total_sell_count, total_sell_sum, total_earn))
     slack_msg += 'Total: %d/%d' % (total_buy_count, total_sell_count)
     log(slack_msg, ':sunny:')
 
