@@ -22,6 +22,7 @@ int config_delay = 10;
 int flag_verbose = 0;
 int num_trades = 0;
 int config_check_price_time = 30;
+int config_use_ratio = 1;
 
 /* Utilities */
 bool iszero(double a)
@@ -521,18 +522,7 @@ struct Bot {
         }
     }
 
-    void check_price(int32_t now, double price) {
-        // No position.
-        if (ex.pos.side == Position::UNKNOWN)
-            return;
-
-        double ratio = get_current_value_ratio(ex.pos, price);
-
-        if (flag_verbose) {
-            printf("%80s #%d BOT: Ratio: %f, price: %f\n",
-                   " ", now, ratio, price);
-        }
-
+    void check_ratio_flow(int32_t now, float ratio, double price) {
         // Checks if need to stop loss.
         if (ratio < config_stop_loss_ratio) {
             printf("%80s #%d BOT: Price: %f Ratio: %f, Should close %s position to "
@@ -570,6 +560,24 @@ struct Bot {
                 return;
             }
         }
+    }
+
+    void check_price(int32_t now, double price) {
+        // No position.
+        if (ex.pos.side == Position::UNKNOWN)
+            return;
+
+        double ratio = get_current_value_ratio(ex.pos, price);
+
+        if (flag_verbose) {
+            printf("%80s #%d BOT: Ratio: %f, price: %f\n",
+                   " ", now, ratio, price);
+        }
+
+        if (config_use_ratio) {
+            check_ratio_flow(now, ratio, price);
+        }
+
     }
 };
 
