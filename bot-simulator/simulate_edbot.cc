@@ -22,7 +22,13 @@ int config_delay = 10;
 int flag_verbose = 0;
 int num_trades = 0;
 int config_check_price_time = 30;
-int config_use_ratio = 1;
+
+// NOTE: Switch the flow.
+// Use ratio flow for non-zero config_use_ratio.
+int config_use_ratio = 0;
+// Use life time flow for non-zero config_position_life.
+// The time to close a position if it does not make new high.
+int config_position_life_time = 0;
 
 /* Utilities */
 bool iszero(double a)
@@ -396,6 +402,11 @@ struct Bot {
     // close position.
     double take_profit_ratio = 0;
 
+    // Use this in check_life_time_flow.
+    int32_t last_highest_ratio_time = 0;
+    // Initialize highest ratio as a impossible negative value.
+    double highest_ratio = -1;
+
     Bot(Exchange& exchange) :ex(exchange) {}
 
     // Assume the first move is buy.
@@ -406,6 +417,10 @@ struct Bot {
     void create_new_position(int32_t now, Position::Side s) {
         // Reset take_profit_ratio.
         take_profit_ratio = 0;
+
+        // Reset highest ratio and its time.
+        highest_ratio = -1.0;
+        last_highest_ratio_time = now;
 
         if (!orders.empty()) {
             printf("%100s #%d BOT: Do not create new order because "
@@ -482,7 +497,7 @@ struct Bot {
         // Checks if the position is closed.
         if (ex.pos.amount == 0) {
             printf("%100s #%d BOT: Closed a %s position\n",
-                   " ", now, win ? "WIN" : "LOSE");
+                   " ", now, win ? "WIN" : "LOSS");
 
             // Logic of determining next move.
 
@@ -492,7 +507,7 @@ struct Bot {
                 // Win, so reset backoff time.
                 backoff_time = config_init_backoff_time;
             }
-            // Last is LONG and LOSE.
+            // Last is LONG and LOSS.
             if (!win && ex.last_pos.side == Position::LONG) {
                 next_move = Position::SHORT;
                 backoff_time = backoff_time << 1;
@@ -503,7 +518,7 @@ struct Bot {
                 // Win, so reset backoff time.
                 backoff_time = config_init_backoff_time;
             }
-            // Last is SHORT and LOSE.
+            // Last is SHORT and LOSS.
             if (!win && ex.last_pos.side == Position::SHORT) {
                 next_move = Position::LONG;
                 backoff_time = backoff_time << 1;
@@ -562,6 +577,32 @@ struct Bot {
         }
     }
 
+    /*
+     * If there is no new highest ratio for config_position_life_time since
+     * last high, close the position.
+     * If there is a new highest ratio, update the higest ratio and
+     * last highest ratio time.
+     */
+    void check_life_time_flow(int32_t now, float ratio, double price) {
+        // New high. Update the timestamp and highest ratio.
+        if (ratio > highest_ratio) {
+            highest_ratio = ratio;
+            last_highest_ratio_time = now;
+            printf("%80s #%d BOT: Price: %f Ratio: %f, a new high\n",
+                   " ", now, price, ratio);
+            return;
+        }
+
+        if (now - last_highest_ratio_time >= config_position_life_time) {
+            printf("%80s #%d BOT: Price: %f Ratio: %f, Should close %s position."
+                   " This is a %s.\n",
+                   "  ", now, price, ratio,
+                   ex.pos.side == Position::LONG ? "LONG" : "SHORT",
+                   ratio > 0 ? "WIN" : "LOSS");
+            close_position(now);
+        }
+    }
+
     void check_price(int32_t now, double price) {
         // No position.
         if (ex.pos.side == Position::UNKNOWN)
@@ -578,6 +619,9 @@ struct Bot {
             check_ratio_flow(now, ratio, price);
         }
 
+        if (config_position_life_time) {
+            check_life_time_flow(now, ratio, price);
+        }
     }
 };
 
@@ -598,7 +642,7 @@ void print_account_value(Exchange& ex, Trade t)
 int main(int argc, char*argv[])
 {
     int ch;
-    while ((ch = getopt(argc, argv, "b:a:t:d:p:s:l:w:m:n:v")) != -1) {
+    while ((ch = getopt(argc, argv, "b:a:t:d:p:s:l:w:m:n:r:o:v")) != -1) {
         switch (ch) {
             case 'b':
                 config_budget = atof(optarg);
@@ -629,6 +673,12 @@ int main(int argc, char*argv[])
                 break;
             case 'n':
                 num_trades = atoi(optarg);
+                break;
+            case 'r':
+                config_use_ratio = atoi(optarg);
+                break;
+            case 'o':
+                config_position_life_time = atoi(optarg);
                 break;
             case 'v':
                 flag_verbose = 1;
