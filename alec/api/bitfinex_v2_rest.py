@@ -36,8 +36,10 @@ class BitfinexApiResponse(object):
     FIELDS = []
 
     def __init__(self, values):
-        assert len(self.FIELDS) == len(values), (len(self.FIELDS), len(values))
+#         assert len(self.FIELDS) == len(values), (len(self.FIELDS), len(values))
         for i, key in enumerate(self.FIELDS):
+            if i >= len(values):
+                break
             value = values[i]
             if not key:  # unknown
                 if value not in [0, None]:
@@ -188,6 +190,12 @@ class Order(BitfinexApiResponse):
         'notify',
         'hidden',
         'placed_id',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
     ]
 
 
