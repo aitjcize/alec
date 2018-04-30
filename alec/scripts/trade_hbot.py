@@ -759,7 +759,7 @@ class TradeBot(object):
         if self.retry_order_in_timeout:
             for order in retry_orders:
                 if order[4] > 0:  # retry
-                    self.new_order(order[0], order[2], order[1], order[4] - 1)
+                    self.new_order(order[0], order[1], order[2], order[4] - 1)
 
     def remove_unconfirm_order(self, pair, price, amount):
         """ Remove an order from unconfirmed list """
