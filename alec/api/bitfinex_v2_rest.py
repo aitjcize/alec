@@ -36,15 +36,11 @@ class BitfinexApiResponse(object):
     FIELDS = []
 
     def __init__(self, values):
-#         assert len(self.FIELDS) == len(values), (len(self.FIELDS), len(values))
         for i, key in enumerate(self.FIELDS):
             if i >= len(values):
                 break
             value = values[i]
             if not key:  # unknown
-                if value not in [0, None]:
-                    print('unknown %s.field[%d] has non trivial value (%r)' %
-                          (self.__class__.__name__, i, value))
                 continue
             self.set(key, value)
 
