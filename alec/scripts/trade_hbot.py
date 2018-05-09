@@ -726,12 +726,12 @@ class TradeBot(object):
         # Order is already in confirmed orders. Ignore it.
         for _, order in self._orders[pair].items():
             if (math.isclose(order.amount_orig, amount, rel_tol=0.01) and
-                    math.isclose(order.price, price, rel_tol=0.01)):
+                    math.isclose(order.price, price, rel_tol=0.001)):
                 return True
         # Order is already in unconfirmed orders. Ignore it.
         for order in self._unconfirm_orders:
             if (order[0] == pair and
-                    math.isclose(order[1], price, rel_tol=0.01) and
+                    math.isclose(order[1], price, rel_tol=0.001) and
                     math.isclose(order[2], amount, rel_tol=0.01)):
                 return True
         # check the value of coins reach the upper limit or not
