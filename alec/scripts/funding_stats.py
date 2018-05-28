@@ -117,7 +117,7 @@ def main():
             flow.append([curr_time, -amount])
             description = '%s -> %s' % (m.group(1), m.group(2))
 
-        elif re.match(r'Margin Funding Payment on wallet Deposit',
+        elif re.match(r'Margin Funding Payment on wallet [Dd]eposit',
                       h['description']):
             amount = h['amount']
             description = 'funding payment'
